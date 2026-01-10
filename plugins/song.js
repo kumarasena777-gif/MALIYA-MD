@@ -6,47 +6,48 @@ cmd(
   {
     pattern: "song",
     react: "🎶",
-    desc: "Download song with buttons",
+    desc: "Download Song",
     category: "download",
     filename: __filename,
   },
   async (bot, mek, m, { from, q, reply }) => {
     try {
-      if (!q) return reply("❌ *Song name or YouTube link ekak denna*");
+      if (!q) return reply("❌ *Song name එකක් දෙන්න*");
 
       const search = await yts(q);
       const data = search.videos[0];
-      if (!data) return reply("❌ *Song ekak hoyaganna bari una*");
+      if (!data) return reply("❌ *Song හම්බුනේ නෑ*");
 
-      const url = data.url;
+      const caption = `🎵 *${data.title}*
+⏱️ ${data.timestamp}
+👁️ ${data.views.toLocaleString()} views
+📅 ${data.ago}
 
-      const caption =
-`🎵 *${data.title}*
+👇 *File type එක select කරන්න*`;
 
-⏱️ Duration: ${data.timestamp}
-👀 Views: ${data.views.toLocaleString()}
-📅 Uploaded: ${data.ago}
-
-⬇️ *Button ekak click karala download karanna*`;
-
-      // 🔘 Buttons message
-      await bot.sendMessage(from, {
-        image: { url: data.thumbnail },
-        caption,
-        buttons: [
-          {
-            buttonId: `.songaudio ${url}`,
-            buttonText: { displayText: "🎧 Audio (MP3)" },
-            type: 1
-          },
-          {
-            buttonId: `.songdoc ${url}`,
-            buttonText: { displayText: "📁 Document (MP3)" },
-            type: 1
-          }
-        ],
-        headerType: 4
-      }, { quoted: mek });
+      // 🔹 BUTTON MESSAGE
+      await bot.sendMessage(
+        from,
+        {
+          image: { url: data.thumbnail },
+          caption,
+          footer: "MALIYA‑MD 🎧",
+          buttons: [
+            {
+              buttonId: `song_audio|${data.url}`,
+              buttonText: { displayText: "🎧 Get Audio" },
+              type: 1,
+            },
+            {
+              buttonId: `song_doc|${data.url}`,
+              buttonText: { displayText: "📄 Get Document" },
+              type: 1,
+            },
+          ],
+          headerType: 4,
+        },
+        { quoted: mek }
+      );
 
     } catch (e) {
       console.log(e);
@@ -55,49 +56,44 @@ cmd(
   }
 );
 
-/* ===============================
-   AUDIO BUTTON HANDLER
-================================ */
+// 🔹 BUTTON HANDLER
 cmd(
-  { pattern: "songaudio", dontAddCommandList: true },
-  async (bot, mek, m, { from, args, reply }) => {
+  {
+    filter: (text) =>
+      text.startsWith("song_audio|") || text.startsWith("song_doc|"),
+  },
+  async (bot, mek, m, { from, body, reply }) => {
     try {
-      const url = args[0];
-      if (!url) return;
+      const [type, url] = body.split("|");
+      const quality = "192";
+      const songData = await ytmp3(url, quality);
 
-      const songData = await ytmp3(url, "192");
+      if (type === "song_audio") {
+        await bot.sendMessage(
+          from,
+          {
+            audio: { url: songData.download.url },
+            mimetype: "audio/mpeg",
+          },
+          { quoted: mek }
+        );
+      }
 
-      await bot.sendMessage(from, {
-        audio: { url: songData.download.url },
-        mimetype: "audio/mpeg"
-      }, { quoted: mek });
+      if (type === "song_doc") {
+        await bot.sendMessage(
+          from,
+          {
+            document: { url: songData.download.url },
+            mimetype: "audio/mpeg",
+            fileName: "song.mp3",
+          },
+          { quoted: mek }
+        );
+      }
 
     } catch (e) {
-      reply("❌ Audio download error");
-    }
-  }
-);
-
-/* ===============================
-   DOCUMENT BUTTON HANDLER
-================================ */
-cmd(
-  { pattern: "songdoc", dontAddCommandList: true },
-  async (bot, mek, m, { from, args, reply }) => {
-    try {
-      const url = args[0];
-      if (!url) return;
-
-      const songData = await ytmp3(url, "192");
-
-      await bot.sendMessage(from, {
-        document: { url: songData.download.url },
-        mimetype: "audio/mpeg",
-        fileName: "song.mp3"
-      }, { quoted: mek });
-
-    } catch (e) {
-      reply("❌ Document download error");
+      console.log(e);
+      reply("❌ Download failed");
     }
   }
 );
