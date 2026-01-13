@@ -11,7 +11,7 @@ cmd(
     filename: __filename,
   },
   async (
-    bot,
+    maliya,
     mek,
     m,
     {
@@ -47,7 +47,7 @@ cmd(
       const url = data.url;
 
       let desc = `
-
+Song downloader
 🎬 *Title:* ${data.title}
 ⏱️ *Duration:* ${data.timestamp}
 📅 *Uploaded:* ${data.ago}
@@ -55,7 +55,7 @@ cmd(
 🔗 *Watch Here:* ${data.url}
 `;
 
-      await bot.sendMessage(
+      await maliya.sendMessage(
         from,
         { image: { url: data.thumbnail }, caption: desc },
         { quoted: mek }
@@ -74,7 +74,7 @@ cmd(
         return reply("⏳ *Sorry, audio files longer than 30 minutes are not supported.*");
       }
 
-      await bot.sendMessage(
+      await maliya.sendMessage(
         from,
         {
           audio: { url: songData.download.url },
@@ -83,7 +83,7 @@ cmd(
         { quoted: mek }
       );
 
-      await bot.sendMessage(
+      await maliya.sendMessage(
         from,
         {
           document: { url: songData.download.url },
@@ -94,13 +94,10 @@ cmd(
         { quoted: mek }
       );
 
-      // 🔹 Final reply in MALIYA-MD style
-      return reply(
-        "✅ *Song downloaded successfully!* 🎶\n\n" +
+      return reply("✅ *Song downloaded successfully!* 🎶\n\n" +
         "*🎧 Enjoy your music!*\n" +
         "*👤 Creator:* Malindu Nadith\n\n" +
-        "🙏 Thanks for using *_MALIYA-MD_*"
-      );
+        "🙏 Thanks for using *_MALIYA-MD_*");
     } catch (e) {
       console.log(e);
       reply(`❌ *Error:* ${e.message} 😞`);
