@@ -1,121 +1,79 @@
 const { cmd } = require("../command");
 const yts = require("yt-search");
-const ytdl = require("ytdl-core");
-
-const songCache = {}; // temporary cache for step replies
+const { ytmp3 } = require("@vreden/youtube_scraper");
 
 cmd(
   {
     pattern: "song",
     react: "🎶",
-    desc: "Download Song with audio/document step control",
+    desc: "Download Song",
     category: "download",
     filename: __filename,
   },
-  async (bot, mek, m, { from, reply, q }) => {
+  async (maliya, mek, m, { from, reply, q }) => {
     try {
       if (!q) return reply("❌ *Please provide a song name or YouTube link*");
 
-      // Check if direct YouTube link or search term
-      let url = q.match(/(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+/);
-      let videoInfo;
+      // Search video
+      const search = await yts(q);
+      if (!search.videos || search.videos.length === 0)
+        return reply("*❌ No results found!*");
 
-      if (url) {
-        // Direct link
-        videoInfo = await ytdl.getInfo(q);
-      } else {
-        // Search YouTube
-        const search = await yts(q);
-        if (!search.videos || search.videos.length === 0)
-          return reply("*❌ No results found!*");
+      const data = search.videos[0];
+      const url = data.url;
 
-        const data = search.videos[0];
-        url = data.url;
-        videoInfo = await ytdl.getInfo(url);
-      }
-
-      const title = videoInfo.videoDetails.title;
-      const lengthSec = parseInt(videoInfo.videoDetails.lengthSeconds);
-      if (lengthSec > 1800)
-        return reply("⏳ *Sorry, audio files longer than 30 minutes are not supported.*");
-
-      const thumbnail = videoInfo.videoDetails.thumbnails.slice(-1)[0].url;
-
-      // Store in cache
-      songCache[from] = {
-        title,
-        url,
-      };
-
-      // Reply #1 → thumbnail + info
+      // Send thumbnail + info first
       const desc = `
-🎬 *Title:* ${title}
-⏱️ *Duration:* ${Math.floor(lengthSec / 60)}:${lengthSec % 60}
-👤 *Uploader:* ${videoInfo.videoDetails.author.name}
-🔗 *Watch Here:* ${url}
-
-*Reply with 1 to get audio file, 2 to get document file*
+🎬 *Title:* ${data.title}
+⏱️ *Duration:* ${data.timestamp}
+📅 *Uploaded:* ${data.ago}
+👀 *Views:* ${data.views.toLocaleString()}
+🔗 *Watch Here:* ${data.url}
 `;
 
-      await bot.sendMessage(
+      await maliya.sendMessage(
         from,
-        { image: { url: thumbnail }, caption: desc },
+        { image: { url: data.thumbnail }, caption: desc },
         { quoted: mek }
+      );
+
+      // Limit duration to 30 min
+      let durationParts = data.timestamp.split(":").map(Number);
+      const totalSeconds =
+        durationParts.length === 3
+          ? durationParts[0] * 3600 + durationParts[1] * 60 + durationParts[2]
+          : durationParts[0] * 60 + durationParts[1];
+
+      if (totalSeconds > 1800)
+        return reply("⏳ *Sorry, audio files longer than 30 minutes are not supported.*");
+
+      // Download audio
+      const quality = "192";
+      const songData = await ytmp3(url, quality);
+
+      if (!songData || !songData.download || !songData.download.url)
+        return reply("*❌ Failed to fetch song download link.*");
+
+      // Send audio safely
+      await maliya.sendMessage(
+        from,
+        {
+          audio: { url: songData.download.url },
+          mimetype: "audio/mpeg",
+          fileName: `${data.title}.mp3`,
+        },
+        { quoted: mek }
+      );
+
+      return reply(
+        "✅ *Song downloaded successfully!* 🎶\n\n" +
+          "*🎧 Enjoy your music!*\n" +
+          "*👤 Creator:* Malindu Nadith\n\n" +
+          "🙏 Thanks for using *_MALIYA-MD_*"
       );
     } catch (e) {
       console.log(e);
-      reply(`❌ *Error:* ${e.message}`);
-    }
-  }
-);
-
-// Listen to step replies
-cmd(
-  {
-    on: "message",
-  },
-  async (bot, mek, m, { from, body, reply }) => {
-    try {
-      if (!songCache[from]) return;
-
-      const step = body.trim();
-      const song = songCache[from];
-
-      if (!song) return;
-
-      if (step === "1") {
-        // Reply #2 → audio only
-        await bot.sendMessage(
-          from,
-          {
-            audio: {
-              url: song.url,
-            },
-            mimetype: "audio/mpeg",
-            fileName: `${song.title}.mp3`,
-          },
-          { quoted: mek }
-        );
-      } else if (step === "2") {
-        // Reply #3 → document only
-        await bot.sendMessage(
-          from,
-          {
-            document: {
-              url: song.url,
-            },
-            mimetype: "audio/mpeg",
-            fileName: `${song.title}.mp3`,
-            caption: "🎶 Your song document file",
-          },
-          { quoted: mek }
-        );
-
-        // Remove cache
-        delete songCache[from];
-      }
-    } catch (e) {
-      console.log(e);
+      reply(`❌ *Error:* ${e.message} 😞`);
     }
   }
 );
