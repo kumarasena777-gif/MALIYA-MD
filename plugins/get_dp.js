@@ -1,43 +1,43 @@
 const { cmd } = require("../command");
 
-const OWNER_NUMBER = "94701369636"; // <-- YOUR NUMBER
-const OWNER_JID = OWNER_NUMBER + "@s.whatsapp.net";
-
 cmd(
   {
     pattern: "getpp",
     react: "🖼️",
-    desc: "Get receiver's WhatsApp DP automatically",
+    desc: "Get your WhatsApp DP (private chat only, returns to you)",
     category: "utility",
     filename: __filename,
   },
-  async (conn, mek, m, { from }) => {
+  async (conn, mek, m, { from, reply }) => {
     try {
-      // only inbox
-      if (from.endsWith("@g.us")) return;
+      // Group block
+      if (from.endsWith("@g.us")) {
+        return reply("*❌ This command works only in private chat.*");
+      }
 
-      const targetJid = mek.sender; // DP owner (user who RECEIVED the msg)
+      // DP owner = command sender
+      const userJid = mek.sender;
 
       let pp;
       try {
-        pp = await conn.profilePictureUrl(targetJid, "image");
+        pp = await conn.profilePictureUrl(userJid, "image");
       } catch {
-        return conn.sendMessage(
-          OWNER_JID,
-          { text: "❌ User has no DP or it is private." }
-        );
+        return reply("*❌ You don't have a profile picture or it's private.*");
       }
 
+      // Send DP back to the user who typed the command
       await conn.sendMessage(
-        OWNER_JID,
+        from,
         {
           image: { url: pp },
-          caption: "🖼️ WhatsApp DP ",
-        }
+          caption: "🖼️ *Here is your WhatsApp profile picture*",
+        },
+        { quoted: mek }
       );
 
     } catch (e) {
       console.error(e);
+      reply("*❌ Error while fetching your DP*");
     }
   }
 );
