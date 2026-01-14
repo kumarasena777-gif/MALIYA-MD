@@ -236,7 +236,7 @@ cmd({
 });
 
 cmd({
-    pattern: "logo search",
+    pattern: "logos",
     desc: "Search for logo effects",
     category: "logo",
     react: "🔍",
@@ -270,7 +270,7 @@ cmd({
 });
 
 cmd({
-    pattern: "logo random",
+    pattern: "logor",
     desc: "Create random logo effect",
     category: "logo",
     react: "🎲",
@@ -306,7 +306,7 @@ cmd({
 });
 
 cmd({
-    pattern: "logo batch",
+    pattern: "logob",
     desc: "Create multiple effects at once",
     category: "logo",
     react: "🔄",
@@ -379,7 +379,7 @@ cmd({
 });
 
 cmd({
-    pattern: "logo info",
+    pattern: "logoi",
     desc: "Get information about a logo effect",
     category: "logo",
     react: "ℹ️",
@@ -412,7 +412,7 @@ cmd({
 });
 
 cmd({
-    pattern: "logo help",
+    pattern: "logoh",
     desc: "Help for logo commands",
     category: "logo",
     react: "❓",
