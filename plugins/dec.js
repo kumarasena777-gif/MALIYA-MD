@@ -10,89 +10,67 @@ cmd(
   {
     pattern: "dec",
     react: "📝",
-    desc: "Generate Sinhala/English essay with Gemini",
+    desc: "Generate Sinhala / English essay",
     category: "ai",
     filename: __filename,
   },
-  async (bot, mek, m, { from, q, body, isCmd, command }) => {
+  async (bot, mek, m, { from, q }) => {
     try {
-      if (!GEMINI_API_KEY || GEMINI_API_KEY.includes("PASTE_YOUR")) {
-        return await bot.sendMessage(from, { text: "❌ Gemini API key not set in dec.js" }, { quoted: mek });
-      }
-
-      // q usually contains text after command in this framework
-      const input = (q || "").trim();
-      if (!input) {
+      if (!q) {
         return await bot.sendMessage(
           from,
-          {
-            text:
-              "❌ Title missing.\n\n✅ Usage:\n.dec <title>\n.dec en <title>\n\nExample:\n.dec ශ්‍රී ලංකාවේ සංස්කෘතිය\n.dec en The Importance of Education",
-          },
+          { text: "❌ Usage:\n.dec <title>\n.dec en <title>" },
           { quoted: mek }
         );
       }
 
-      // Language handling:
-      // .dec en My Title
-      // default Sinhala
       let lang = "si";
-      let title = input;
+      let title = q.trim();
 
-      const firstWord = input.split(/\s+/)[0]?.toLowerCase();
-      if (firstWord === "en" || firstWord === "si") {
-        lang = firstWord;
-        title = input.split(/\s+/).slice(1).join(" ").trim();
-      }
-
-      if (!title) {
-        return await bot.sendMessage(from, { text: "❌ Please provide a valid title." }, { quoted: mek });
+      if (q.toLowerCase().startsWith("en ")) {
+        lang = "en";
+        title = q.slice(3).trim();
       }
 
       const prompt =
         lang === "en"
-          ? `Write a well-structured English essay about: "${title}". Include: an introduction, 3-5 body paragraphs with clear points, and a conclusion. Keep it clear and school-friendly.`
-          : `මෙම මාතෘකාව ගැන හොඳින් සංවිධානය කළ සිංහල රචනාවක් ලියන්න: "${title}". හැඳින්වීම, මූලික අදහස් 3-5 පරිච්ඡේද, සහ අවසාන නිගමනය ඇතුළත් කරන්න. සරල, පැහැදිලි, ශිෂ්‍ය මට්ටමට ගැලපෙන විදිහට ලියන්න.`;
+          ? `Write a clear English essay about "${title}" with introduction, body paragraphs, and conclusion.`
+          : `“${title}” ගැන හොඳින් සංවිධානය කළ සිංහල රචනාවක් ලියන්න. හැඳින්වීම, මූලික අදහස්, සහ නිගමනය ඇතුළත් කරන්න.`;
 
       const endpoint =
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" +
-        encodeURIComponent(GEMINI_API_KEY);
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=" +
+        GEMINI_API_KEY;
 
-      const res = await axios.post(
-        endpoint,
-        {
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 900 },
-        },
-        { headers: { "Content-Type": "application/json" } }
-      );
+      const res = await axios.post(endpoint, {
+        contents: [{ parts: [{ text: prompt }] }],
+      });
 
-      const out =
-        res?.data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("")?.trim() ||
-        "";
+      const text =
+        res.data.candidates?.[0]?.content?.parts?.[0]?.text;
 
-      if (!out) {
-        console.log("Gemini response:", res.data);
-        return await bot.sendMessage(from, { text: "❌ Gemini returned empty text." }, { quoted: mek });
+      if (!text) {
+        return await bot.sendMessage(
+          from,
+          { text: "❌ Gemini returned empty response." },
+          { quoted: mek }
+        );
       }
-
-      // WhatsApp caption safe limit
-      const MAX = 3500;
-      const essay = out.length > MAX ? out.slice(0, MAX) + "\n\n...(trimmed)" : out;
-
-      const caption = `📝 ${lang === "en" ? "Essay" : "රචනාව"}: ${title}\n\n${essay}`;
 
       await bot.sendMessage(
         from,
         {
           image: { url: IMAGE_URL },
-          caption,
+          caption: `📝 ${lang === "en" ? "Essay" : "රචනාව"}: ${title}\n\n${text.slice(0, 3500)}`,
         },
         { quoted: mek }
       );
     } catch (e) {
       console.log("DEC ERROR:", e?.response?.data || e);
-      await bot.sendMessage(from, { text: "❌ Error while generating essay (check console)." }, { quoted: mek });
+      await bot.sendMessage(
+        from,
+        { text: "❌ Gemini API error. Check API key or model access." },
+        { quoted: mek }
+      );
     }
   }
 );
