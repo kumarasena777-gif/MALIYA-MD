@@ -10,30 +10,39 @@ cmd({
 },
 async (bot, mek, m, { from, reply, quoted }) => {
     try {
-        // Check if the replied message is a View Once message
-        const isQuotedViewOnce = m.quoted ? (m.quoted.message?.viewOnceMessageV2 || m.quoted.message?.viewOnceMessage || m.quoted.message?.viewOnceMessageV2Extension) : false;
+        // Reply කර ඇති පණිවිඩය ලබා ගැනීම
+        let target = m.quoted ? m.quoted : m;
+        
+        // View Once දත්ත තිබේදැයි විවිධ ක්‍රම වලට පරීක්ෂා කිරීම
+        const msg = target.message?.viewOnceMessageV2?.message || 
+                    target.message?.viewOnceMessage?.message || 
+                    target.message?.viewOnceMessageV2Extension?.message ||
+                    target.message;
 
-        if (!m.quoted || !isQuotedViewOnce) {
+        // එය image හෝ video එකක්දැයි බැලීම
+        const isImage = msg?.imageMessage ? true : false;
+        const isVideo = msg?.videoMessage ? true : false;
+        const isViewOnce = msg?.imageMessage?.viewOnce || msg?.videoMessage?.viewOnce || target.msg?.viewOnce;
+
+        if (!isImage && !isVideo) {
             return reply("❌ Please reply to a *View Once* photo or video.");
         }
 
-        // Extract the media content
-        let viewOnceContent = m.quoted.message.viewOnceMessageV2?.message || m.quoted.message.viewOnceMessage?.message || m.quoted.message.viewOnceMessageV2Extension?.message;
-        let type = Object.keys(viewOnceContent)[0];
-        
-        // Download the media buffer
-        let buffer = await m.quoted.download();
+        // මීඩියා එක Download කිරීම
+        let buffer = await target.download();
 
-        const caption = `*🔓 View Once Unlocked By MALIYA-MD*\n\n*Type:* ${type === 'imageMessage' ? 'Image 📸' : 'Video 🎥'}\n*Sender:* @${m.quoted.sender.split('@')[0]}`;
+        if (!buffer) return reply("❌ Could not download the media.");
 
-        if (type === 'imageMessage') {
-            await bot.sendMessage(from, { image: buffer, caption: caption, mentions: [m.quoted.sender] }, { quoted: mek });
-        } else if (type === 'videoMessage') {
-            await bot.sendMessage(from, { video: buffer, caption: caption, mentions: [m.quoted.sender] }, { quoted: mek });
+        const caption = `*🔓 View Once Unlocked By MALIYA-MD*\n\n*Type:* ${isImage ? 'Image 📸' : 'Video 🎥'}\n*Sender:* @${target.sender.split('@')[0]}`;
+
+        if (isImage) {
+            await bot.sendMessage(from, { image: buffer, caption: caption, mentions: [target.sender] }, { quoted: mek });
+        } else if (isVideo) {
+            await bot.sendMessage(from, { video: buffer, caption: caption, mentions: [target.sender] }, { quoted: mek });
         }
 
     } catch (e) {
         console.error("VV ERROR:", e);
-        reply("❌ Error retrieving media. It might have been deleted or the bot lacks permission.");
+        reply("❌ Error: Make sure you are replying to a View Once message.");
     }
 });
