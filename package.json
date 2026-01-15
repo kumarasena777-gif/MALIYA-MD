@@ -41,6 +41,7 @@
     "yt-search": "latest",
     "ytdl-core": "latest",
     "sadaslk-dlcore": "latest",
-    "abir-photo360-apis": "latest"
+    "abir-photo360-apis": "latest",
+    "puppeteer": "latest"
   }
 }
