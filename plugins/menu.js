@@ -48,7 +48,7 @@ cmd(
         from,
         {
           image: {
-            url: "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_unjbleunjbleunjb.png",
+            url: "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png?raw=true",
           },
           caption: cachedMenu,
         },
@@ -61,5 +61,6 @@ cmd(
     }
   }
 );
+
 
 
