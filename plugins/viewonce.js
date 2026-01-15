@@ -1,48 +1,121 @@
-const { cmd } = require("../command");
+const { cmd } = require('../command');
+const ViewOnceHandler = require('../lib/viewOnceHandler');
+const fs = require('fs');
+
+// Initialize handler
+const viewOnceHandler = new ViewOnceHandler();
 
 cmd({
     pattern: "vv",
-    alias: ["viewonce", "retrieve"],
-    desc: "Convert view once media to normal media",
-    category: "tools",
-    react: "🔓",
+    desc: "View once message එක unlimited බලන්න (.vv කියලා reply කරන්න)",
+    react: "👁️",
+    category: "media",
     filename: __filename
 },
-async (bot, mek, m, { from, reply, quoted }) => {
+async (bot, mek, m, {
+    from, quoted, body, isCmd, command, args, q, isGroup,
+    sender, senderNumber, botNumber2, botNumber, pushname,
+    isMe, isOwner, groupMetadata, groupName, participants,
+    groupAdmins, isBotAdmins, isAdmins, reply
+}) => {
     try {
-        // Reply කර ඇති පණිවිඩය ලබා ගැනීම
-        let target = m.quoted ? m.quoted : m;
+        // Check if it's a reply
+        if (!quoted) {
+            return reply("❌ කරුණාකර view once message එකකට .vv කියලා reply කරන්න!");
+        }
+
+        // Send processing message
+        await reply("⏳ View once message process කරමින්...");
+
+        // Extract the view once media
+        const result = await viewOnceHandler.extractViewOnceMedia(bot, quoted);
+
+        if (!result.success) {
+            return reply(`❌ Error: ${result.error}\n\nමෙය view once message එකක් නොවෙන්න පුළුවන්!`);
+        }
+
+        // Send the extracted media back
+        const fileBuffer = fs.readFileSync(result.filePath);
         
-        // View Once දත්ත තිබේදැයි විවිධ ක්‍රම වලට පරීක්ෂා කිරීම
-        const msg = target.message?.viewOnceMessageV2?.message || 
-                    target.message?.viewOnceMessage?.message || 
-                    target.message?.viewOnceMessageV2Extension?.message ||
-                    target.message;
-
-        // එය image හෝ video එකක්දැයි බැලීම
-        const isImage = msg?.imageMessage ? true : false;
-        const isVideo = msg?.videoMessage ? true : false;
-        const isViewOnce = msg?.imageMessage?.viewOnce || msg?.videoMessage?.viewOnce || target.msg?.viewOnce;
-
-        if (!isImage && !isVideo) {
-            return reply("❌ Please reply to a *View Once* photo or video.");
+        switch (result.mediaType) {
+            case 'image':
+                await bot.sendMessage(from, {
+                    image: fileBuffer,
+                    caption: `📸 View Once Image\n✅ Now you can view unlimited times!${result.caption ? '\n' + result.caption : ''}`,
+                    mimetype: result.mimetype
+                }, { quoted: mek });
+                break;
+                
+            case 'video':
+                await bot.sendMessage(from, {
+                    video: fileBuffer,
+                    caption: `🎬 View Once Video\n✅ Now you can view unlimited times!${result.caption ? '\n' + result.caption : ''}`,
+                    mimetype: result.mimetype
+                }, { quoted: mek });
+                break;
+                
+            case 'audio':
+                await bot.sendMessage(from, {
+                    audio: fileBuffer,
+                    mimetype: result.mimetype,
+                    ptt: result.mimetype.includes('ogg')
+                }, { quoted: mek });
+                break;
+                
+            case 'sticker':
+                await bot.sendMessage(from, {
+                    sticker: fileBuffer,
+                    mimetype: result.mimetype
+                }, { quoted: mek });
+                break;
+                
+            case 'document':
+                await bot.sendMessage(from, {
+                    document: fileBuffer,
+                    fileName: `viewonce_${Date.now()}.${result.filePath.split('.').pop()}`,
+                    caption: `📄 View Once Document\n✅ Now you can view unlimited times!`,
+                    mimetype: result.mimetype
+                }, { quoted: mek });
+                break;
+                
+            default:
+                await reply(`✅ View once content extracted!\nType: ${result.mediaType}\nFile saved temporarily.`);
         }
 
-        // මීඩියා එක Download කිරීම
-        let buffer = await target.download();
+        // Send success message
+        await bot.sendMessage(from, {
+            text: `✅ Success! View once message now available unlimited times!\n📁 Type: ${result.mediaType.toUpperCase()}`
+        }, { quoted: mek });
 
-        if (!buffer) return reply("❌ Could not download the media.");
+        // Cleanup old files
+        viewOnceHandler.cleanupTempFiles();
 
-        const caption = `*🔓 View Once Unlocked By MALIYA-MD*\n\n*Type:* ${isImage ? 'Image 📸' : 'Video 🎥'}\n*Sender:* @${target.sender.split('@')[0]}`;
+    } catch (error) {
+        console.error('Error in .vv command:', error);
+        reply(`❌ Error: ${error.message}`);
+    }
+});
 
-        if (isImage) {
-            await bot.sendMessage(from, { image: buffer, caption: caption, mentions: [target.sender] }, { quoted: mek });
-        } else if (isVideo) {
-            await bot.sendMessage(from, { video: buffer, caption: caption, mentions: [target.sender] }, { quoted: mek });
-        }
-
-    } catch (e) {
-        console.error("VV ERROR:", e);
-        reply("❌ Error: Make sure you are replying to a View Once message.");
+// Also add auto-save version if needed
+cmd({
+    pattern: "autovv",
+    desc: "Auto-save view once messages (ON/OFF)",
+    react: "⚡",
+    category: "media",
+    filename: __filename
+},
+async (bot, mek, m, {
+    from, quoted, body, isCmd, command, args, q, isGroup,
+    sender, senderNumber, botNumber2, botNumber, pushname,
+    isMe, isOwner, groupMetadata, groupName, participants,
+    groupAdmins, isBotAdmins, isAdmins, reply
+}) => {
+    try {
+        // This would require storing state in a database
+        // For now, just show info
+        reply(`🔧 Auto View Once feature\n\nCurrently only .vv reply method is available.\n\nUse: *.vv* as a reply to any view once message to view it unlimited times!`);
+    } catch (error) {
+        console.error(error);
+        reply(`${error}`);
     }
 });
