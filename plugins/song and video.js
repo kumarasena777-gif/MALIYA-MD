@@ -24,6 +24,7 @@ cmd(
     alias: ["yta", "ytmp3", "yts"],
     desc: "Download YouTube MP3 by name or link using MALIYA-MD",
     category: "download",
+    react: "🎶",
     filename: __filename,
   },
   async (bot, mek, m, { from, q, reply }) => {
@@ -76,6 +77,7 @@ cmd(
     alias: ["ytv", "ytmp4", "vid"],
     desc: "Download YouTube MP4 by name or link",
     category: "download",
+    react: "📺",
     filename: __filename,
   },
   async (bot, mek, m, { from, q, reply }) => {
@@ -137,6 +139,7 @@ cmd(
     alias: ["tt", "ttdl", "td"],
     desc: "Download TikTok video",
     category: "download",
+    react: "🎥",
     filename: __filename,
   },
   async (bot, mek, m, { from, q, reply }) => {
