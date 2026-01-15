@@ -4,6 +4,7 @@ const path = require("path");
 
 module.exports = {
   pattern: "status",
+  alias: ["sts", "stdl", "st", "gets", "stts"],
   desc: "Download WhatsApp Status",
   category: "download",
   react: "👀",
