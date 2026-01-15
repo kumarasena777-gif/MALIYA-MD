@@ -7,8 +7,8 @@ const viewOnceHandler = new ViewOnceHandler();
 
 cmd({
     pattern: "vv",
-    desc: "View once message එක unlimited බලන්න (.vv කියලා reply කරන්න)",
-    react: "👁️",
+    desc: "View once message unlock",
+    react: "🔓",
     category: "media",
     filename: __filename
 },
@@ -21,17 +21,17 @@ async (bot, mek, m, {
     try {
         // Check if it's a reply
         if (!quoted) {
-            return reply("❌ කරුණාකර view once message එකකට .vv කියලා reply කරන්න!");
+            return reply("❌ Please send *.vv*!");
         }
 
         // Send processing message
-        await reply("⏳ View once message process කරමින්...");
+        await reply("⏳ View once messagae processing...");
 
         // Extract the view once media
         const result = await viewOnceHandler.extractViewOnceMedia(bot, quoted);
 
         if (!result.success) {
-            return reply(`❌ Error: ${result.error}\n\nමෙය view once message එකක් නොවෙන්න පුළුවන්!`);
+            return reply(`❌ Error: ${result.error}\n\nThis is not a view once msg!`);
         }
 
         // Send the extracted media back
@@ -41,7 +41,7 @@ async (bot, mek, m, {
             case 'image':
                 await bot.sendMessage(from, {
                     image: fileBuffer,
-                    caption: `📸 View Once Image\n✅ Now you can view unlimited times!${result.caption ? '\n' + result.caption : ''}`,
+                    caption: `📸 View Once Image\n✅view onec msg has been unlocked bn MALIYA-MD!${result.caption ? '\n' + result.caption : ''}`,
                     mimetype: result.mimetype
                 }, { quoted: mek });
                 break;
@@ -49,7 +49,7 @@ async (bot, mek, m, {
             case 'video':
                 await bot.sendMessage(from, {
                     video: fileBuffer,
-                    caption: `🎬 View Once Video\n✅ Now you can view unlimited times!${result.caption ? '\n' + result.caption : ''}`,
+                    caption: `🎬 View Once Video\n✅ view onec msg has been unlocked bn MALIYA-MD!${result.caption ? '\n' + result.caption : ''}`,
                     mimetype: result.mimetype
                 }, { quoted: mek });
                 break;
@@ -73,18 +73,18 @@ async (bot, mek, m, {
                 await bot.sendMessage(from, {
                     document: fileBuffer,
                     fileName: `viewonce_${Date.now()}.${result.filePath.split('.').pop()}`,
-                    caption: `📄 View Once Document\n✅ Now you can view unlimited times!`,
+                    caption: `📄 View Once Document\n✅ view onec msg has been unlocked bn MALIYA-MD!!`,
                     mimetype: result.mimetype
                 }, { quoted: mek });
                 break;
                 
             default:
-                await reply(`✅ View once content extracted!\nType: ${result.mediaType}\nFile saved temporarily.`);
+                await reply(`view onec msg has been unlocked bn MALIYA-MD!\nType: ${result.mediaType}\nFile saved temporarily.`);
         }
 
         // Send success message
         await bot.sendMessage(from, {
-            text: `✅ Success! View once message now available unlimited times!\n📁 Type: ${result.mediaType.toUpperCase()}`
+            text: `✅ view onec msg has been unlocked bn MALIYA-MD!\n📁 Type: ${result.mediaType.toUpperCase()}`
         }, { quoted: mek });
 
         // Cleanup old files
