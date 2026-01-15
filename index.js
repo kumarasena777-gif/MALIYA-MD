@@ -85,9 +85,9 @@ async function connectToWA() {
         ownerNumber[0] + "@s.whatsapp.net",
         {
           image: {
-            url: "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/Gemini_Generated_Image_unjbleunjbleunjb.png"
+            url: "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png?raw=true"
           },
-          caption: "MALIYA-MD connected successfully ⚡"
+          caption: "MALIYA-MD connected successfully ⚡! | Prefix '.' use *.menu* or *.list* to learn how to use MALIYA-MD"
         }
       );
 
