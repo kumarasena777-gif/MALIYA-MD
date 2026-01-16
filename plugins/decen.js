@@ -1,3 +1,6 @@
+const { cmd } = require('../command');
+const axios = require('axios');
+
 cmd({
   pattern: "decen",
   desc: "English Essay",
@@ -34,6 +37,6 @@ ${q}
   } catch (e) {
     console.error(e);
     await react("❌");
-    reply("DeepSeek server error. Try again.");
+    return reply("DeepSeek server error. Try again.");
   }
 });
