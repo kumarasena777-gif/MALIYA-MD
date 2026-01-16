@@ -80,9 +80,9 @@ async function wikiFetch(lang, title) {
 
 cmd(
   {
-    pattern: "dec",
+    pattern: "info",
     react: "📚",
-    desc: "Generate Sinhala/English essay using MALIYA-MD",
+    desc: "information genarator for MALIYA-MD",
     category: "info",
     filename: __filename,
   },
