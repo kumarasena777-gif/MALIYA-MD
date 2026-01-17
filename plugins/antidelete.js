@@ -127,7 +127,7 @@ module.exports = {
       const sender = key.participant || from;
 
       let caption =
-`🗑️ *Deleted Message Recovered bt maliya-md*
+`🗑️ *Deleted Message Recovered by MALIYA-MD*
 
 👤 *Sender:* @${sender.split('@')[0]}
 🕒 *Time:* ${new Date().toLocaleString()}`;
