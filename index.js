@@ -1,7 +1,7 @@
 const { 
   default: makeWASocket,
   useMultiFileAuthState,
-  DisconnectReason,
+  DismaliyaectReason,
   jidNormalizedUser,
   getContentType,
   proto,
@@ -64,12 +64,12 @@ async function ensureSessionFile() {
       fs.writeFileSync(credsPath, data);
       console.log("✅ Session downloaded and saved. Restarting bot...");
       setTimeout(() => {
-        connectToWA();
+        maliyaectToWA();
       }, 2000);
     });
   } else {
     setTimeout(() => {
-      connectToWA();
+      maliyaectToWA();
     }, 1000);
   }
 }
@@ -80,8 +80,8 @@ global.pluginHooks = global.pluginHooks || [];
 global.pluginHooks.push(antiDeletePlugin);
 
 
-async function connectToWA() {
-  console.log("Connecting MALIYA-MD 🧬...");
+async function maliyaectToWA() {
+  console.log("maliyaecting MALIYA-MD 🧬...");
   const { state, saveCreds } = await useMultiFileAuthState(path.join(__dirname, '/auth_info_baileys/'));
   const { version } = await fetchLatestBaileysVersion();
 
@@ -92,20 +92,20 @@ async function connectToWA() {
     auth: state,
     version,
     syncFullHistory: true,
-    markOnlineOnConnect: true,
+    markOnlineOnmaliyaect: true,
     generateHighQualityLinkPreview: true,
   });
 
-  maliya.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect } = update;
-    if (connection === 'close') {
-      if (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) {
-        connectToWA();
+  maliya.ev.on('maliyaection.update', async (update) => {
+    const { maliyaection, lastDismaliyaect } = update;
+    if (maliyaection === 'close') {
+      if (lastDismaliyaect?.error?.output?.statusCode !== DismaliyaectReason.loggedOut) {
+        maliyaectToWA();
       }
-    } else if (connection === 'open') {
-      console.log('✅ MALIYA-MD connected to WhatsApp');
+    } else if (maliyaection === 'open') {
+      console.log('✅ MALIYA-MD maliyaected to WhatsApp');
 
-      const up = `MALIYA-MD connected ✅\n\nPREFIX: ${prefix}`;
+      const up = `MALIYA-MD maliyaected ✅\n\nPREFIX: ${prefix}`;
       await maliya.sendMessage(ownerNumber[0] + "@s.whatsapp.net", {
         image: { url: `https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png` },
         caption: up
@@ -139,7 +139,7 @@ if (mek.key?.remoteJid === 'status@broadcast') {
 
   if (config.AUTO_STATUS_SEEN === "true") {
     try {
-      await conn.readMessages([mek.key]);
+      await maliya.readMessages([mek.key]);
       console.log(`[✓] Status seen: ${mek.key.id}`);
     } catch (e) {
       console.error("❌ Failed to mark status as seen:", e);
@@ -151,7 +151,7 @@ if (mek.key?.remoteJid === 'status@broadcast') {
       const emojis = ['❤️', '💸', '😇', '🍂', '💥', '💯', '🔥', '💫', '💎', '💗', '🥲', '🥰', '👀', '🙌', '🙆', '🚩', '🥰', '💐', '😎', '🤎', '✅', '🫀', '🧡', '😁', '😄', '🌸', '🕊️', '🌷', '⛅', '🌟', '🗿', '💜', '💙', '🌝', '🖤', '💚'];
       const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
 
-      await conn.sendMessage(mek.key.participant, {
+      await maliya.sendMessage(mek.key.participant, {
         react: {
           text: randomEmoji,
           key: mek.key,
@@ -168,7 +168,7 @@ if (mek.key?.remoteJid === 'status@broadcast') {
     const text = mek.message.extendedTextMessage.text || "";
     if (text.trim().length > 0) {
       try {
-        await conn.sendMessage(ownerNumber[0] + "@s.whatsapp.net", {
+        await maliya.sendMessage(ownerNumber[0] + "@s.whatsapp.net", {
           text: `📝 *Text Status*\n👤 From: @${mentionJid.split("@")[0]}\n\n${text}`,
           mentions: [mentionJid]
         });
@@ -197,7 +197,7 @@ if (mek.key?.remoteJid === 'status@broadcast') {
       const mimetype = mediaMsg.mimetype || (msgType === "imageMessage" ? "image/jpeg" : "video/mp4");
       const captionText = mediaMsg.caption || "";
 
-      await conn.sendMessage(ownerNumber[0] + "@s.whatsapp.net", {
+      await maliya.sendMessage(ownerNumber[0] + "@s.whatsapp.net", {
         [msgType === "imageMessage" ? "image" : "video"]: buffer,
         mimetype,
         caption: `📥 *Forwarded Status*\n👤 From: @${mentionJid.split("@")[0]}\n\n${captionText}`,
@@ -272,12 +272,12 @@ if (mek.key?.remoteJid === 'status@broadcast') {
   });
 
   
-  conn.ev.on('messages.update', async (updates) => {
+  maliya.ev.on('messages.update', async (updates) => {
     if (global.pluginHooks) {
       for (const plugin of global.pluginHooks) {
         if (plugin.onDelete) {
           try {
-            await plugin.onDelete(conn, updates);
+            await plugin.onDelete(maliya, updates);
           } catch (e) {
             console.log("onDelete error:", e);
           }
