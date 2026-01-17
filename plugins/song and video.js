@@ -5,17 +5,12 @@ const fs = require("fs");
 const axios = require("axios");
 const path = require("path");
 
-/* ================== HELPERS ================== */
+/* ================= HELPERS ================= */
 
 async function downloadFile(url, filePath) {
   const writer = fs.createWriteStream(filePath);
-  const response = await axios({
-    url,
-    method: "GET",
-    responseType: "stream",
-  });
-
-  response.data.pipe(writer);
+  const res = await axios({ url, method: "GET", responseType: "stream" });
+  res.data.pipe(writer);
 
   return new Promise((resolve, reject) => {
     writer.on("finish", resolve);
@@ -30,7 +25,6 @@ async function getYoutube(query) {
     const id = query.includes("v=")
       ? query.split("v=")[1].split("&")[0]
       : query.split("/").pop();
-
     return await yts({ videoId: id });
   }
 
@@ -38,7 +32,7 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
-/* ================== SONG ================== */
+/* ================= SONG ================= */
 
 cmd(
   {
@@ -54,6 +48,19 @@ cmd(
       reply("Searching YouTube...");
       const video = await getYoutube(q);
       if (!video) return reply("No results found.");
+
+      // Thumbnail + info
+      await bot.sendMessage(
+        from,
+        {
+          image: { url: video.thumbnail },
+          caption:
+            `🎵 ${video.title}\n` +
+            `👤 Channel: ${video.author.name}\n` +
+            `⏱ Duration: ${video.timestamp}`,
+        },
+        { quoted: mek }
+      );
 
       reply("Downloading song...");
       const data = await ytmp3(video.url);
@@ -78,7 +85,7 @@ cmd(
   }
 );
 
-/* ================== VIDEO (FIXED) ================== */
+/* ================= VIDEO ================= */
 
 cmd(
   {
@@ -95,6 +102,20 @@ cmd(
       const video = await getYoutube(q);
       if (!video) return reply("No results found.");
 
+      // Thumbnail + info
+      await bot.sendMessage(
+        from,
+        {
+          image: { url: video.thumbnail },
+          caption:
+            `🎬 ${video.title}\n` +
+            `👤 Channel: ${video.author.name}\n` +
+            `⏱ Duration: ${video.timestamp}\n` +
+            `👀 Views: ${video.views.toLocaleString()}`,
+        },
+        { quoted: mek }
+      );
+
       reply("Downloading video (WhatsApp safe)...");
       const data = await ytmp4(video.url, { videoQuality: "360" });
 
@@ -109,7 +130,6 @@ cmd(
           fileName: `${video.title}.mp4`,
           caption:
             "YouTube video downloaded successfully.\n" +
-            "WhatsApp safe format.\n" +
             "MALIYA-MD ❤️",
         },
         { quoted: mek }
@@ -123,7 +143,7 @@ cmd(
   }
 );
 
-/* ================== TIKTOK (UNCHANGED) ================== */
+/* ================= TIKTOK ================= */
 
 cmd(
   {
@@ -136,6 +156,7 @@ cmd(
     try {
       if (!q) return reply("Please send a TikTok link.");
 
+      reply("Downloading TikTok video...");
       const data = await tiktok(q);
       if (!data?.no_watermark)
         return reply("Failed to download TikTok video.");
@@ -144,7 +165,8 @@ cmd(
         from,
         {
           video: { url: data.no_watermark },
-          caption: "TikTok video downloaded successfully.",
+          caption:
+            "TikTok video downloaded successfully.\nMALIYA-MD ❤️",
         },
         { quoted: mek }
       );
