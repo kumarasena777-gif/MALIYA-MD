@@ -81,7 +81,7 @@ global.pluginHooks.push(antiDeletePlugin);
 
 
 async function maliyaectToWA() {
-  console.log("maliyaecting MALIYA-MD 🧬...");
+  console.log("Connecting MALIYA-MD 🧬...");
   const { state, saveCreds } = await useMultiFileAuthState(path.join(__dirname, '/auth_info_baileys/'));
   const { version } = await fetchLatestBaileysVersion();
 
@@ -103,9 +103,9 @@ async function maliyaectToWA() {
         maliyaectToWA();
       }
     } else if (maliyaection === 'open') {
-      console.log('✅ MALIYA-MD maliyaected to WhatsApp');
+      console.log('✅ MALIYA-MD Connected to WhatsApp');
 
-      const up = `MALIYA-MD maliyaected ✅\n\nPREFIX: ${prefix}`;
+      const up = `MALIYA-MD Connected ✅\n\nPREFIX: ${prefix}`;
       await maliya.sendMessage(ownerNumber[0] + "@s.whatsapp.net", {
         image: { url: `https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png` },
         caption: up
