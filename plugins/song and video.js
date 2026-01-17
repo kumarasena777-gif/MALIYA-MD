@@ -1,10 +1,28 @@
 const { cmd } = require("../command");
 const { ytmp3, ytmp4, tiktok } = require("sadaslk-dlcore");
 const yts = require("yt-search");
+const fs = require("fs");
+const axios = require("axios");
+const path = require("path");
 
-/**
- * Get YouTube video info by name or link
- */
+/* ================== HELPERS ================== */
+
+async function downloadFile(url, filePath) {
+  const writer = fs.createWriteStream(filePath);
+  const response = await axios({
+    url,
+    method: "GET",
+    responseType: "stream",
+  });
+
+  response.data.pipe(writer);
+
+  return new Promise((resolve, reject) => {
+    writer.on("finish", resolve);
+    writer.on("error", reject);
+  });
+}
+
 async function getYoutube(query) {
   const isUrl = /(youtube\.com|youtu\.be)/i.test(query);
 
@@ -13,169 +31,126 @@ async function getYoutube(query) {
       ? query.split("v=")[1].split("&")[0]
       : query.split("/").pop();
 
-    const info = await yts({ videoId: id });
-    return info;
+    return await yts({ videoId: id });
   }
 
   const search = await yts(query);
-  if (!search.videos || search.videos.length === 0) return null;
-
   return search.videos[0];
 }
 
-/* ===================== SONG (MP3) ===================== */
+/* ================== SONG ================== */
 
 cmd(
   {
     pattern: "song",
-    alias: ["yta", "ytmp3"],
-    desc: "Download YouTube song (MP3)",
-    category: "download",
     react: "🎵",
+    category: "download",
     filename: __filename,
   },
   async (bot, mek, m, { from, q, reply }) => {
     try {
-      if (!q)
-        return reply("🎵 Please send a song name or YouTube link.");
+      if (!q) return reply("Please send a song name or YouTube link.");
 
-      reply("🔎 Searching on YouTube...");
-
+      reply("Searching YouTube...");
       const video = await getYoutube(q);
-      if (!video) return reply("❌ No song found.");
+      if (!video) return reply("No results found.");
 
-      await bot.sendMessage(
-        from,
-        {
-          image: { url: video.thumbnail },
-          caption:
-            `🎵 *${video.title}*\n\n` +
-            `👤 Channel: ${video.author.name}\n` +
-            `⏱ Duration: ${video.timestamp}`,
-        },
-        { quoted: mek }
-      );
-
-      reply("⬇️ Downloading song (MP3)...");
-
+      reply("Downloading song...");
       const data = await ytmp3(video.url);
-      if (!data || !data.url)
-        return reply("❌ Failed to download the song.");
+
+      const filePath = path.join(__dirname, `${Date.now()}.mp3`);
+      await downloadFile(data.url, filePath);
 
       await bot.sendMessage(
         from,
         {
-          audio: { url: data.url },
+          audio: fs.readFileSync(filePath),
           mimetype: "audio/mpeg",
         },
         { quoted: mek }
       );
-    } catch (err) {
-      console.log("YTMP3 ERROR:", err);
-      reply("❌ An error occurred while downloading the song.");
+
+      fs.unlinkSync(filePath);
+    } catch (e) {
+      console.log(e);
+      reply("Error while downloading song.");
     }
   }
 );
 
-/* ===================== VIDEO (MP4) ===================== */
+/* ================== VIDEO (FIXED) ================== */
 
 cmd(
   {
     pattern: "video",
-    alias: ["ytv", "ytmp4", "vid"],
-    desc: "Download YouTube video (WhatsApp safe)",
-    category: "download",
     react: "🎬",
+    category: "download",
     filename: __filename,
   },
   async (bot, mek, m, { from, q, reply }) => {
     try {
-      if (!q)
-        return reply("🎬 Please send a YouTube link or video name.");
+      if (!q) return reply("Please send a YouTube link or video name.");
 
-      reply("🔎 Searching on YouTube...");
-
+      reply("Searching YouTube...");
       const video = await getYoutube(q);
-      if (!video) return reply("❌ No video found.");
+      if (!video) return reply("No results found.");
+
+      reply("Downloading video (WhatsApp safe)...");
+      const data = await ytmp4(video.url, { videoQuality: "360" });
+
+      const filePath = path.join(__dirname, `${Date.now()}.mp4`);
+      await downloadFile(data.url, filePath);
 
       await bot.sendMessage(
         from,
         {
-          image: { url: video.thumbnail },
-          caption:
-            `🎬 *${video.title}*\n\n` +
-            `👤 Channel: ${video.author.name}\n` +
-            `⏱ Duration: ${video.timestamp}`,
-        },
-        { quoted: mek }
-      );
-
-      reply("⬇️ Downloading video Using MALIYA-MD...");
-
-      const data = await ytmp4(video.url, {
-        format: "mp4",
-        videoQuality: "360",
-      });
-
-      if (!data || !data.url)
-        return reply("❌ Failed to download the video.");
-
-      // Send as document (NO WhatsApp error)
-      await bot.sendMessage(
-        from,
-        {
-          document: { url: data.url },
+          document: fs.readFileSync(filePath),
           mimetype: "video/mp4",
           fileName: `${video.title}.mp4`,
           caption:
-            "🎬 YouTube video downloaded successfully!\n" +
-            "✅ WhatsApp supported format\n" +
-            "Thanks for using *MALIYA-MD* ❤️",
+            "YouTube video downloaded successfully.\n" +
+            "WhatsApp safe format.\n" +
+            "MALIYA-MD ❤️",
         },
         { quoted: mek }
       );
-    } catch (err) {
-      console.log("YTMP4 ERROR:", err);
-      reply("❌ An error occurred while downloading the video.");
+
+      fs.unlinkSync(filePath);
+    } catch (e) {
+      console.log(e);
+      reply("Error while downloading video.");
     }
   }
 );
 
-/* ===================== TIKTOK ===================== */
+/* ================== TIKTOK (UNCHANGED) ================== */
 
 cmd(
   {
     pattern: "tiktok",
-    alias: ["tt", "ttdl"],
-    desc: "Download TikTok video (No watermark)",
-    category: "download",
     react: "🎥",
+    category: "download",
     filename: __filename,
   },
   async (bot, mek, m, { from, q, reply }) => {
     try {
-      if (!q)
-        return reply("📱 Please send a TikTok video link.");
-
-      reply("⬇️ Downloading TikTok video...");
+      if (!q) return reply("Please send a TikTok link.");
 
       const data = await tiktok(q);
-      if (!data || !data.no_watermark)
-        return reply("❌ Failed to download TikTok video.");
+      if (!data?.no_watermark)
+        return reply("Failed to download TikTok video.");
 
       await bot.sendMessage(
         from,
         {
           video: { url: data.no_watermark },
-          caption:
-            "🎥 TikTok video downloaded successfully!\n" +
-            "Thanks for using *MALIYA-MD* ❤️",
+          caption: "TikTok video downloaded successfully.",
         },
         { quoted: mek }
       );
-    } catch (err) {
-      console.log("TIKTOK ERROR:", err);
-      reply("❌ An error occurred while downloading TikTok video.");
+    } catch (e) {
+      console.log(e);
+      reply("Error while downloading TikTok video.");
     }
   }
 );
