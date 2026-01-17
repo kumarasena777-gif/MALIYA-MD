@@ -242,6 +242,11 @@ if (mek.key?.remoteJid === 'status@broadcast') {
     if (isCmd) {
       const cmd = commands.find((c) => c.pattern === commandName || (c.alias && c.alias.includes(commandName)));
       if (cmd) {
+
+            // ✅ PRIVATE MODE CHECK (ADD HERE)
+    if (config.MODE === "private" && !isOwner) {
+      return; 
+    }
         if (cmd.react) maliya.sendMessage(from, { react: { text: cmd.react, key: mek.key } });
         try {
           cmd.function(maliya, mek, m, {
