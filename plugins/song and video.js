@@ -34,7 +34,7 @@ async function getYoutube(query) {
 
 // auto progress bar
 function generateProgressBar(duration) {
-  const totalBars = 15;
+  const totalBars = 10;
   const bar = "─".repeat(totalBars);
   return `*00:00* ${bar}○ *${duration}*`;
 }
@@ -76,7 +76,7 @@ cmd(
 ${progressBar}
 
 🍀 *ENJOY YOUR SONG* 🍀
-> USE HEADPHONES FOR THE BEST EXPERIENCE 🎧
+> USE HEADPHONES FOR THE BEST EXPERIENCE 🎧🎧🎧🎧🎧🎧🎧
           `,
         },
         { quoted: mek }
