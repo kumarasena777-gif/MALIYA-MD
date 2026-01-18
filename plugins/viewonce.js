@@ -1,121 +1,113 @@
-const { cmd } = require('../command');
-const ViewOnceHandler = require('../lib/viewOnceHandler');
-const fs = require('fs');
+const { cmd } = require("../command");
+const fs = require("fs");
+const path = require("path");
+const { downloadMediaMessage } = require("@whiskeysockets/baileys");
 
-// Initialize handler
-const viewOnceHandler = new ViewOnceHandler();
+const tempFolder = path.join(__dirname, "../temp");
+if (!fs.existsSync(tempFolder)) fs.mkdirSync(tempFolder, { recursive: true });
 
-cmd({
+function unwrapMessage(message) {
+  if (!message) return null;
+
+  if (message.ephemeralMessage) return unwrapMessage(message.ephemeralMessage.message);
+  if (message.viewOnceMessageV2) return unwrapMessage(message.viewOnceMessageV2.message);
+  if (message.viewOnceMessage) return unwrapMessage(message.viewOnceMessage.message);
+
+  return message;
+}
+
+function detectMediaType(m) {
+  if (!m) return null;
+  if (m.imageMessage) return { type: "image", node: m.imageMessage, ext: ".jpg" };
+  if (m.videoMessage) return { type: "video", node: m.videoMessage, ext: ".mp4" };
+  return null;
+}
+
+cmd(
+  {
     pattern: "vv",
-    desc: "View once message unlock",
-    react: "🔓",
-    category: "media",
-    filename: __filename
-},
-async (bot, mek, m, {
-    from, quoted, body, isCmd, command, args, q, isGroup,
-    sender, senderNumber, botNumber2, botNumber, pushname,
-    isMe, isOwner, groupMetadata, groupName, participants,
-    groupAdmins, isBotAdmins, isAdmins, reply
-}) => {
+    desc: "Convert View Once image/video to normal (reply to view once message)",
+    category: "tools",
+    react: "👁️",
+    filename: __filename,
+  },
+  async (conn, mek, m, { from, quoted, reply }) => {
     try {
-        // Check if it's a reply
-        if (!quoted) {
-            return reply("❌ Please send *.vv*!");
-        }
+      // Must reply to a message
+      const q = m.quoted || quoted;
+      if (!q || !q.message) {
+        return reply("❌ *Reply (quote) to a View Once photo/video and type* `.vv`");
+      }
 
-        // Send processing message
-        await reply("⏳ View once messagae processing...");
+      // Raw quoted message (Baileys form)
+      const rawQuotedMsg = q.message;
 
-        // Extract the view once media
-        const result = await viewOnceHandler.extractViewOnceMedia(bot, quoted);
+      // Check if the quoted message is view-once wrapper
+      const isVO =
+        !!rawQuotedMsg?.viewOnceMessage ||
+        !!rawQuotedMsg?.viewOnceMessageV2 ||
+        !!rawQuotedMsg?.ephemeralMessage?.message?.viewOnceMessage ||
+        !!rawQuotedMsg?.ephemeralMessage?.message?.viewOnceMessageV2;
 
-        if (!result.success) {
-            return reply(`❌ Error: ${result.error}\n\nThis is not a view once msg!`);
-        }
+      if (!isVO) {
+        return reply("❌ *That message is not a View Once photo/video.*");
+      }
 
-        // Send the extracted media back
-        const fileBuffer = fs.readFileSync(result.filePath);
-        
-        switch (result.mediaType) {
-            case 'image':
-                await bot.sendMessage(from, {
-                    image: fileBuffer,
-                    caption: `📸 View Once Image\n✅view onec msg has been unlocked bn MALIYA-MD!${result.caption ? '\n' + result.caption : ''}`,
-                    mimetype: result.mimetype
-                }, { quoted: mek });
-                break;
-                
-            case 'video':
-                await bot.sendMessage(from, {
-                    video: fileBuffer,
-                    caption: `🎬 View Once Video\n✅ view onec msg has been unlocked bn MALIYA-MD!${result.caption ? '\n' + result.caption : ''}`,
-                    mimetype: result.mimetype
-                }, { quoted: mek });
-                break;
-                
-            case 'audio':
-                await bot.sendMessage(from, {
-                    audio: fileBuffer,
-                    mimetype: result.mimetype,
-                    ptt: result.mimetype.includes('ogg')
-                }, { quoted: mek });
-                break;
-                
-            case 'sticker':
-                await bot.sendMessage(from, {
-                    sticker: fileBuffer,
-                    mimetype: result.mimetype
-                }, { quoted: mek });
-                break;
-                
-            case 'document':
-                await bot.sendMessage(from, {
-                    document: fileBuffer,
-                    fileName: `viewonce_${Date.now()}.${result.filePath.split('.').pop()}`,
-                    caption: `📄 View Once Document\n✅ view onec msg has been unlocked bn MALIYA-MD!!`,
-                    mimetype: result.mimetype
-                }, { quoted: mek });
-                break;
-                
-            default:
-                await reply(`view onec msg has been unlocked bn MALIYA-MD!\nType: ${result.mediaType}\nFile saved temporarily.`);
-        }
+      // Unwrap to inner imageMessage/videoMessage
+      const clean = unwrapMessage(rawQuotedMsg);
+      const inner = detectMediaType(clean);
 
-        // Send success message
-        await bot.sendMessage(from, {
-            text: `✅ view onec msg has been unlocked bn MALIYA-MD!\n📁 Type: ${result.mediaType.toUpperCase()}`
-        }, { quoted: mek });
+      if (!inner) {
+        return reply("❌ *Only View Once IMAGE/VIDEO supported.*");
+      }
 
-        // Cleanup old files
-        viewOnceHandler.cleanupTempFiles();
+      // Build a downloadable message object
+      // Use quoted key if available
+      const dlKey = q.key || mek.message?.extendedTextMessage?.contextInfo?.quotedMessage?.key;
 
-    } catch (error) {
-        console.error('Error in .vv command:', error);
-        reply(`❌ Error: ${error.message}`);
+      // Most wrappers provide q.key from sms() quoted
+      const keyToUse = q.key || mek.key;
+
+      const dlMsg = {
+        key: keyToUse,
+        message: clean,
+      };
+
+      // Guard for empty mediaKey (prevents "Cannot derive from empty media key")
+      if (!inner.node?.mediaKey) {
+        return reply("❌ *Cannot download this View Once media (missing mediaKey).*");
+      }
+
+      const buffer = await downloadMediaMessage(dlMsg, "buffer", {});
+      if (!buffer || !buffer.length) {
+        return reply("❌ *Download failed (no data).*");
+      }
+
+      const filePath = path.join(
+        tempFolder,
+        `vv_${keyToUse.id || Date.now()}_${Date.now()}${inner.ext}`
+      );
+
+      await fs.promises.writeFile(filePath, buffer);
+
+      // Keep original caption if any
+      const originalCaption = inner.node?.caption || "";
+      const cap = originalCaption || undefined;
+
+      if (inner.type === "image") {
+        await conn.sendMessage(from, { image: { url: filePath }, caption: cap }, { quoted: mek });
+      } else {
+        await conn.sendMessage(from, { video: { url: filePath }, caption: cap }, { quoted: mek });
+      }
+
+      // cleanup
+      setTimeout(() => {
+        try { fs.unlinkSync(filePath); } catch {}
+      }, 60 * 1000);
+
+    } catch (e) {
+      console.log("❌ .vv error:", e?.message || e);
+      reply("❌ *Error while converting View Once media.*");
     }
-});
-
-// Also add auto-save version if needed
-cmd({
-    pattern: "autovv",
-    desc: "Auto-save view once messages (ON/OFF)",
-    react: "⚡",
-    category: "media",
-    filename: __filename
-},
-async (bot, mek, m, {
-    from, quoted, body, isCmd, command, args, q, isGroup,
-    sender, senderNumber, botNumber2, botNumber, pushname,
-    isMe, isOwner, groupMetadata, groupName, participants,
-    groupAdmins, isBotAdmins, isAdmins, reply
-}) => {
-    try {
-        // This would require storing state in a database
-        // For now, just show info
-        reply(`🔧 Auto View Once feature\n\nCurrently only .vv reply method is available.\n\nUse: *.vv* as a reply to any view once message to view it unlimited times!`);
-    } catch (error) {
-        console.error(error);
-        reply(`${error}`);
-    }
-});
+  }
+);
