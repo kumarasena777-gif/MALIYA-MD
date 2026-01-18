@@ -8,7 +8,7 @@ if (!fs.existsSync(tempFolder)) {
 }
 
 const messageStore = new Map();
-const mediaStore = new Map(); 
+const mediaStore = new Map();
 
 const CLEANUP_TIME = 10 * 60 * 1000;
 
@@ -45,19 +45,27 @@ function getExtension(type, msg) {
   }
 }
 
+/* ===== FIX: use remoteJid|id key to avoid mismatch/collision ===== */
+function makeKey(key) {
+  return `${key.remoteJid}|${key.id}`;
+}
+function safeFileBase(storeKey) {
+  return storeKey.replace(/[^a-zA-Z0-9]/g, '_');
+}
+
 module.exports = {
   name: 'antidelete',
 
   onMessage: async (conn, msg) => {
     if (!msg?.message || msg.key.fromMe) return;
 
-    const keyId = msg.key.id;
+    const storeKey = makeKey(msg.key);
     const remoteJid = msg.key.remoteJid;
 
     const cleanMessage = unwrapMessage(msg.message);
     if (!cleanMessage) return;
 
-    messageStore.set(keyId, {
+    messageStore.set(storeKey, {
       key: msg.key,
       message: cleanMessage,
       remoteJid
@@ -90,16 +98,16 @@ module.exports = {
       if (!buffer.length) return;
 
       const ext = getExtension(type, cleanMessage);
-      const filePath = path.join(tempFolder, `${keyId}${ext}`);
+      const filePath = path.join(tempFolder, `${safeFileBase(storeKey)}${ext}`);
 
       await fs.promises.writeFile(filePath, buffer);
-      mediaStore.set(keyId, filePath);
+      mediaStore.set(storeKey, filePath);
 
       setTimeout(() => {
-        messageStore.delete(keyId);
-        if (mediaStore.has(keyId)) {
-          try { fs.unlinkSync(mediaStore.get(keyId)); } catch {}
-          mediaStore.delete(keyId);
+        messageStore.delete(storeKey);
+        if (mediaStore.has(storeKey)) {
+          try { fs.unlinkSync(mediaStore.get(storeKey)); } catch {}
+          mediaStore.delete(storeKey);
         }
       }, CLEANUP_TIME);
 
@@ -119,21 +127,21 @@ module.exports = {
 
       if (!isDelete) continue;
 
-      const keyId = key.id;
-      const stored = messageStore.get(keyId);
+      const storeKey = makeKey(key);
+      const stored = messageStore.get(storeKey);
       if (!stored) continue;
 
       const from = key.remoteJid;
       const sender = key.participant || from;
 
       let caption =
-`🗑️ *Deleted Message Recovered By MALIYA=MD*
+`🗑️ *Deleted Message Recovered By MALIYA-MD*
 
 👤 *Sender:* @${sender.split('@')[0]}
 🕒 *Time:* ${new Date().toLocaleString()}`;
 
       try {
-        const mediaPath = mediaStore.get(keyId);
+        const mediaPath = mediaStore.get(storeKey);
         if (mediaPath && fs.existsSync(mediaPath)) {
           const opts = { caption, mentions: [sender] };
 
