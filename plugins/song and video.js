@@ -81,7 +81,8 @@ cmd(
             `👀 *Views:* ${video.views.toLocaleString()}\n` +
             `📅 *Uploaded:* ${video.ago}\n\n` +
             `${progressBar}\n\n` +
-            `⬇️ *Downloading audio...* 🎧`,
+            `🍀ENJOY YOUR SONG🍀\n\n`,
+            `>USE HEADPHONES FOR THE BEST EXPERIENCE🎧\n`,
         },
         { quoted: mek }
       );
