@@ -32,40 +32,64 @@ async function getYoutube(query) {
   return search.videos[0];
 }
 
+// convert timestamp (3:42 / 1:02:10) → seconds
+function durationToSeconds(time) {
+  if (!time) return 0;
+  const parts = time.split(":").map(Number);
+  return parts.length === 3
+    ? parts[0] * 3600 + parts[1] * 60 + parts[2]
+    : parts[0] * 60 + parts[1];
+}
+
+// auto progress bar
+function generateProgressBar(duration) {
+  const totalBars = 15;
+  const bar = "─".repeat(totalBars);
+  return `*00:00* ${bar}○ *${duration}*`;
+}
+
 /* ================= SONG ================= */
 
 cmd(
   {
     pattern: "song",
+    alias: ["mp3", "music", "sound"],
     react: "🎵",
     category: "download",
     filename: __filename,
   },
   async (bot, mek, m, { from, q, reply }) => {
     try {
-      if (!q) return reply("Please send a song name or YouTube link.");
+      if (!q) return reply("🎧 Please send a song name or YouTube link.");
 
-      reply("Searching YouTube...");
+      reply("🔍 Searching YouTube...");
       const video = await getYoutube(q);
-      if (!video) return reply("No results found.");
+      if (!video) return reply("❌ No results found.");
 
-      // Thumbnail + info
+      const duration = video.timestamp || "0:00";
+      const progressBar = generateProgressBar(duration);
+
+      // ===== Thumbnail + full details =====
       await bot.sendMessage(
         from,
         {
-          image: { url: video.thumbnail },
+          image: { url: video.th"umbnail },
           caption:
-            `🎵 ${video.title}\n` +
-            `👤 Channel: ${video.author.name}\n` +
-            `⏱ Duration: ${video.timestamp}`,
+            `🎵 *${video.title}*\n\n` +
+            `👤 *Channel:* ${video.author.name}\n` +
+            `⏱ *Duration:* ${duration}\n` +
+            `👀 *Views:* ${video.views.toLocaleString()}\n` +
+            `📅 *Uploaded:* ${video.ago}\n\n` +
+            `${progressBar}\n\n` +
+            `⬇️ *Downloading audio...* 🎧`,
         },
         { quoted: mek }
       );
 
-      reply("Downloading song...");
+      // ===== Download audio =====
       const data = await ytmp3(video.url);
-
       const filePath = path.join(__dirname, `${Date.now()}.mp3`);
+
       await downloadFile(data.url, filePath);
 
       await bot.sendMessage(
@@ -80,7 +104,7 @@ cmd(
       fs.unlinkSync(filePath);
     } catch (e) {
       console.log(e);
-      reply("Error while downloading song.");
+      reply("❌ Error while downloading song.");
     }
   }
 );
@@ -102,13 +126,12 @@ cmd(
       const video = await getYoutube(q);
       if (!video) return reply("No results found.");
 
-      // Thumbnail + info
       await bot.sendMessage(
         from,
         {
           image: { url: video.thumbnail },
           caption:
-            `🎬 ${video.title}\n` +
+            `🎬 *${video.title}*\n\n` +
             `👤 Channel: ${video.author.name}\n` +
             `⏱ Duration: ${video.timestamp}\n` +
             `👀 Views: ${video.views.toLocaleString()}`,
@@ -128,9 +151,7 @@ cmd(
           document: fs.readFileSync(filePath),
           mimetype: "video/mp4",
           fileName: `${video.title}.mp4`,
-          caption:
-            "YouTube video downloaded successfully.\n" +
-            "MALIYA-MD ❤️",
+          caption: "YouTube video downloaded successfully.\nMALIYA-MD ❤️",
         },
         { quoted: mek }
       );
@@ -165,8 +186,7 @@ cmd(
         from,
         {
           video: { url: data.no_watermark },
-          caption:
-            "TikTok video downloaded successfully.\nMALIYA-MD ❤️",
+          caption: "TikTok video downloaded successfully.\nMALIYA-MD ❤️",
         },
         { quoted: mek }
       );
