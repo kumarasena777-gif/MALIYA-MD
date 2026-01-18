@@ -8,96 +8,143 @@ if (!fs.existsSync(tempFolder)) fs.mkdirSync(tempFolder, { recursive: true });
 
 function unwrapMessage(message) {
   if (!message) return null;
-
   if (message.ephemeralMessage) return unwrapMessage(message.ephemeralMessage.message);
   if (message.viewOnceMessageV2) return unwrapMessage(message.viewOnceMessageV2.message);
   if (message.viewOnceMessage) return unwrapMessage(message.viewOnceMessage.message);
-
   return message;
 }
 
-function detectMediaType(m) {
+function detectMedia(m) {
   if (!m) return null;
-  if (m.imageMessage) return { type: "image", node: m.imageMessage, ext: ".jpg" };
-  if (m.videoMessage) return { type: "video", node: m.videoMessage, ext: ".mp4" };
+
+  if (m.imageMessage) {
+    const mime = m.imageMessage.mimetype || "";
+    const ext = mime.includes("png") ? ".png" : ".jpg";
+    return { type: "image", node: m.imageMessage, ext };
+  }
+
+  if (m.videoMessage) {
+    return { type: "video", node: m.videoMessage, ext: ".mp4" };
+  }
+
+  if (m.audioMessage) {
+    const isPtt = m.audioMessage.ptt === true;
+    return {
+      type: "audio",
+      node: m.audioMessage,
+      ext: isPtt ? ".ogg" : ".mp3",
+      ptt: isPtt,
+    };
+  }
+
   return null;
 }
 
 cmd(
   {
     pattern: "vv",
-    desc: "Convert View Once image/video to normal (reply to view once message)",
+    desc: "Convert View Once media to normal (reply to it)",
     category: "tools",
     react: "👁️",
     filename: __filename,
   },
-  async (conn, mek, m, { from, quoted, reply }) => {
+  async (conn, mek, m, { from, isGroup, reply }) => {
     try {
-      // Must reply to a message
-      const q = m.quoted || quoted;
-      if (!q || !q.message) {
-        return reply("❌ *Reply (quote) to a View Once photo/video and type* `.vv`");
+      // ===== get quoted message (raw Baileys way) =====
+      const ctx =
+        mek.message?.extendedTextMessage?.contextInfo ||
+        mek.message?.imageMessage?.contextInfo ||
+        mek.message?.videoMessage?.contextInfo ||
+        mek.message?.documentMessage?.contextInfo ||
+        mek.message?.audioMessage?.contextInfo ||
+        null;
+
+      const quotedMessage = ctx?.quotedMessage;
+      const stanzaId = ctx?.stanzaId;
+      const participant = ctx?.participant;
+
+      if (!quotedMessage || !stanzaId) {
+        return reply("❌ *View Once msg ekata reply karala `.vv` danna.*");
       }
 
-      // Raw quoted message (Baileys form)
-      const rawQuotedMsg = q.message;
-
-      // Check if the quoted message is view-once wrapper
+      // ===== check view once =====
       const isVO =
-        !!rawQuotedMsg?.viewOnceMessage ||
-        !!rawQuotedMsg?.viewOnceMessageV2 ||
-        !!rawQuotedMsg?.ephemeralMessage?.message?.viewOnceMessage ||
-        !!rawQuotedMsg?.ephemeralMessage?.message?.viewOnceMessageV2;
+        !!quotedMessage?.viewOnceMessage ||
+        !!quotedMessage?.viewOnceMessageV2 ||
+        !!quotedMessage?.ephemeralMessage?.message?.viewOnceMessage ||
+        !!quotedMessage?.ephemeralMessage?.message?.viewOnceMessageV2;
 
       if (!isVO) {
-        return reply("❌ *That message is not a View Once photo/video.*");
+        return reply("❌ *Oya reply kare View Once msg ekakata nemei.*");
       }
 
-      // Unwrap to inner imageMessage/videoMessage
-      const clean = unwrapMessage(rawQuotedMsg);
-      const inner = detectMediaType(clean);
+      // ===== unwrap =====
+      const clean = unwrapMessage(quotedMessage);
+      const media = detectMedia(clean);
 
-      if (!inner) {
-        return reply("❌ *Only View Once IMAGE/VIDEO supported.*");
+      if (!media) {
+        return reply("❌ *Image / Video / Audio / Voice witharai support.*");
       }
 
-      // Build a downloadable message object
-      // Use quoted key if available
-      const dlKey = q.key || mek.message?.extendedTextMessage?.contextInfo?.quotedMessage?.key;
+      if (!media.node?.mediaKey) {
+        return reply("❌ *Me View Once media eka download karanna ba.*");
+      }
 
-      // Most wrappers provide q.key from sms() quoted
-      const keyToUse = q.key || mek.key;
-
-      const dlMsg = {
-        key: keyToUse,
-        message: clean,
+      // ===== build quoted key =====
+      const quotedKey = {
+        remoteJid: from,
+        fromMe: false,
+        id: stanzaId,
       };
+      if (isGroup && participant) quotedKey.participant = participant;
 
-      // Guard for empty mediaKey (prevents "Cannot derive from empty media key")
-      if (!inner.node?.mediaKey) {
-        return reply("❌ *Cannot download this View Once media (missing mediaKey).*");
-      }
+      // ===== download =====
+      const buffer = await downloadMediaMessage(
+        { key: quotedKey, message: clean },
+        "buffer",
+        {}
+      );
 
-      const buffer = await downloadMediaMessage(dlMsg, "buffer", {});
       if (!buffer || !buffer.length) {
-        return reply("❌ *Download failed (no data).*");
+        return reply("❌ *Download fail una.*");
       }
 
       const filePath = path.join(
         tempFolder,
-        `vv_${keyToUse.id || Date.now()}_${Date.now()}${inner.ext}`
+        `vv_${stanzaId}_${Date.now()}${media.ext}`
       );
 
       await fs.promises.writeFile(filePath, buffer);
 
-      // Keep original caption if any
-      const originalCaption = inner.node?.caption || "";
-      const cap = originalCaption || undefined;
+      // ===== send =====
+      if (media.type === "image") {
+        await conn.sendMessage(
+          from,
+          { image: { url: filePath }, caption: media.node.caption || undefined },
+          { quoted: mek }
+        );
+      }
 
-      if (inner.type === "image") {
-        await conn.sendMessage(from, { image: { url: filePath }, caption: cap }, { quoted: mek });
-      } else {
-        await conn.sendMessage(from, { video: { url: filePath }, caption: cap }, { quoted: mek });
+      if (media.type === "video") {
+        await conn.sendMessage(
+          from,
+          { video: { url: filePath }, caption: media.node.caption || undefined },
+          { quoted: mek }
+        );
+      }
+
+      if (media.type === "audio") {
+        await conn.sendMessage(
+          from,
+          {
+            audio: { url: filePath },
+            mimetype: media.ptt
+              ? "audio/ogg; codecs=opus"
+              : media.node.mimetype || "audio/mpeg",
+            ptt: media.ptt === true,
+          },
+          { quoted: mek }
+        );
       }
 
       // cleanup
@@ -107,7 +154,7 @@ cmd(
 
     } catch (e) {
       console.log("❌ .vv error:", e?.message || e);
-      reply("❌ *Error while converting View Once media.*");
+      reply("❌ *View Once convert error.*");
     }
   }
 );
