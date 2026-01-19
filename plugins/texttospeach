@@ -4,7 +4,7 @@ const gTTS = require("gtts");
 const fs = require("fs");
 const path = require("path");
 
-// Supported languages (add more if you want)
+// ✅ Add as many as you want (20+)
 const LANGS = {
   si: "Sinhala",
   en: "English",
@@ -25,6 +25,9 @@ const LANGS = {
   zh: "Chinese",
   bn: "Bengali",
   ur: "Urdu",
+  ms: "Malay",
+  nl: "Dutch",
+  pl: "Polish",
 };
 
 async function translate(text, targetLang) {
@@ -41,77 +44,85 @@ async function translate(text, targetLang) {
   });
 
   const data = res.data;
-  const out = (data?.[0] || []).map((x) => x?.[0]).join("");
-  return out || "";
+  return (data?.[0] || []).map((x) => x?.[0]).join("") || "";
 }
 
-async function sendVoice(conn, mek, m, text, lang) {
+async function sendVoice(conn, mek, m, text, lang, asPtt = true) {
   const outDir = path.join(process.cwd(), "tmp");
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
   const outFile = path.join(outDir, `${Date.now()}.mp3`);
-  const tts = new gTTS(text, lang);
 
-  await new Promise((res, rej) => {
-    tts.save(outFile, (err) => (err ? rej(err) : res()));
-  });
+  const tts = new gTTS(text, lang);
+  await new Promise((res, rej) => tts.save(outFile, (err) => (err ? rej(err) : res())));
 
   await conn.sendMessage(
     m.chat,
-    { audio: fs.readFileSync(outFile), mimetype: "audio/mpeg", ptt: true },
+    { audio: fs.readFileSync(outFile), mimetype: "audio/mpeg", ptt: asPtt },
     { quoted: mek }
   );
 
   fs.unlinkSync(outFile);
 }
 
-// ✅ One handler for all ".tts<lang>"
+// ✅ Help command: .tts
 cmd(
   {
     pattern: "tts",
     alias: ["voice"],
-    desc: "Translate to a language and send as voice (Use: .tts<lang> text)",
+    desc: "Translate your text to a language and send as voice",
     category: "utility",
     react: "🗣️",
     filename: __filename,
   },
-  async (conn, mek, m, { body, reply }) => {
-    try {
-      // body example: ".ttssi mama oyata adarei"
-      const cmdText = body.trim();
-      const match = cmdText.match(/^\.(tts|voice)([a-z]{2})\s+([\s\S]+)$/i);
-
-      if (!match) {
-        return reply(
-          "❌ Usage:\n.tts<lang> <text>\n\nExamples:\n.ttssi mama oyata adarei\n.ttsen kohomada oyage day?\n.ttsfr mama oyata adarei\n\nSupported lang codes:\n" +
-            Object.keys(LANGS).join(", ")
-        );
-      }
-
-      const lang = match[2].toLowerCase();
-      const inputText = match[3].trim();
-
-      if (!LANGS[lang]) {
-        return reply(
-          "❌ Unsupported language code.\nSupported:\n" + Object.keys(LANGS).join(", ")
-        );
-      }
-
-      if (!inputText) return reply("❌ Please provide text.");
-
-      await reply(`🔄 Translating to ${LANGS[lang]}...`);
-      const translated = await translate(inputText, lang);
-
-      if (!translated) return reply("❌ Translation failed. Try again.");
-
-      // Optional: show translated text
-      // await reply(`✅ Translated: ${translated}`);
-
-      await reply("🎙️ Generating voice note...");
-      await sendVoice(conn, mek, m, translated, lang);
-    } catch (e) {
-      console.error(e);
-      reply("❌ Failed (network blocked / translate endpoint error).");
-    }
+  async (conn, mek, m, { reply }) => {
+    const codes = Object.keys(LANGS).join(", ");
+    return reply(
+      "✅ Usage:\n" +
+        ".tts<lang> <text>\n\n" +
+        "Examples:\n" +
+        ".ttssi mama oyata adarei\n" +
+        ".ttsen kohomada oyage day?\n" +
+        ".ttsfr mama oyata adarei\n\n" +
+        "Supported lang codes:\n" +
+        codes
+    );
   }
 );
+
+// ✅ Register commands: .ttssi, .ttsen, .ttsfr, ... (+ voice variants)
+for (const code of Object.keys(LANGS)) {
+  const langName = LANGS[code];
+
+  // .tts<code>
+  cmd(
+    {
+      pattern: `tts${code}`,
+      alias: [`voice${code}`], // e.g., .voicesi
+      desc: `Translate to ${langName} and send as voice`,
+      category: "utility",
+      react: "🗣️",
+      filename: __filename,
+    },
+    async (conn, mek, m, { q, reply }) => {
+      try {
+        if (!q) {
+          return reply(
+            `❌ Please provide text.\nExample: .tts${code} hello`
+          );
+        }
+
+        await reply(`🔄 Translating to ${langName}...`);
+        const translated = await translate(q, code);
+
+        if (!translated) return reply("❌ Translation failed. Please try again.");
+
+        await reply("🎙️ Generating voice note...");
+        await sendVoice(conn, mek, m, translated, code, true);
+      } catch (e) {
+        console.error(e);
+        return reply("❌ Failed (network blocked / translate endpoint error).");
+      }
+    }
+  );
+}
