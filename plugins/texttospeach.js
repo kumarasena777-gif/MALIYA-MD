@@ -4,7 +4,7 @@ const googleTTS = require("google-tts-api");
 const fs = require("fs");
 const path = require("path");
 
-/* ================= LANGUAGE LIST (20+) ================= */
+/* ================= LANGUAGES ================= */
 const LANGS = {
   si: "Sinhala",
   en: "English",
@@ -25,9 +25,6 @@ const LANGS = {
   zh: "Chinese",
   bn: "Bengali",
   ur: "Urdu",
-  ms: "Malay",
-  nl: "Dutch",
-  pl: "Polish",
 };
 
 /* ================= TRANSLATE ================= */
@@ -49,30 +46,31 @@ async function translate(text, targetLang) {
   return (res.data?.[0] || []).map((x) => x?.[0]).join("") || "";
 }
 
-/* ================= SEND VOICE ================= */
+/* ================= SEND VOICE (FIXED) ================= */
 async function sendVoice(conn, mek, m, text, lang) {
   const outDir = path.join(process.cwd(), "tmp");
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
   const outFile = path.join(outDir, `${Date.now()}.mp3`);
 
-  // ✅ Sinhala + many languages supported
+  // generate TTS url
   const ttsUrl = googleTTS.getAudioUrl(text, {
     lang,
     slow: false,
     host: "https://translate.google.com",
   });
 
-  // download audio using axios (no fetch)
+  // download audio
   const res = await axios.get(ttsUrl, { responseType: "arraybuffer" });
   fs.writeFileSync(outFile, Buffer.from(res.data));
 
+  // ✅ CORRECT Baileys audio payload
   await conn.sendMessage(
     m.chat,
     {
-      audio: fs.readFileSync(outFile),
+      audio: { url: outFile },
       mimetype: "audio/mpeg",
-      ptt: true, // voice note style
+      ptt: true,
     },
     { quoted: mek }
   );
@@ -80,18 +78,18 @@ async function sendVoice(conn, mek, m, text, lang) {
   fs.unlinkSync(outFile);
 }
 
-/* ================= HELP COMMAND ================= */
+/* ================= HELP ================= */
 cmd(
   {
-    pattern: "tr",
-    alias: ["voice", "tts"],
+    pattern: "tts",
+    alias: ["voice"],
     desc: "Translate text and send as voice (.tts<lang>)",
     category: "utility",
     react: "🗣️",
     filename: __filename,
   },
   async (conn, mek, m, { reply }) => {
-    return reply(
+    reply(
       "🗣️ *Text to Voice*\n\n" +
         "Usage:\n" +
         ".tts<lang> <text>\n\n" +
@@ -105,14 +103,14 @@ cmd(
   }
 );
 
-/* ================= REGISTER ALL .tts<lang> ================= */
+/* ================= REGISTER COMMANDS ================= */
 for (const code of Object.keys(LANGS)) {
   const langName = LANGS[code];
 
   cmd(
     {
-      pattern: `tts${code}`,        // .ttssi
-      alias: [`voice${code}`],      // .voicesi
+      pattern: `tts${code}`,
+      alias: [`voice${code}`],
       desc: `Translate to ${langName} and send voice`,
       category: "utility",
       react: "🗣️",
@@ -121,19 +119,14 @@ for (const code of Object.keys(LANGS)) {
     async (conn, mek, m, { q, reply }) => {
       try {
         if (!q) {
-          return reply(
-            `❌ Please provide text.\nExample: .tts${code} hello`
-          );
+          return reply(`❌ Usage: .tts${code} <text>`);
         }
 
-        await reply(`🔄 Translating to ${langName} from MALIYA-MD...`);
+        await reply(`🔄 Translating to ${langName}...`);
         const translated = await translate(q, code);
+        if (!translated) return reply("❌ Translation failed.");
 
-        if (!translated) {
-          return reply("❌ Translation failed. Try again.");
-        }
-
-        await reply("🎙️ Generating voice note form MALIYA-MD...");
+        await reply("🎙️ Generating voice note from MALIYA-MD...");
         await sendVoice(conn, mek, m, translated, code);
       } catch (err) {
         console.error(err);
