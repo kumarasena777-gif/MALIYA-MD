@@ -1,11 +1,10 @@
 const { cmd } = require("../command");
 const axios = require("axios");
 const googleTTS = require("google-tts-api");
-const fetch = require("node-fetch");
 const fs = require("fs");
 const path = require("path");
 
-// 🌍 Languages (add more anytime)
+/* ================= LANGUAGE LIST (20+) ================= */
 const LANGS = {
   si: "Sinhala",
   en: "English",
@@ -26,9 +25,12 @@ const LANGS = {
   zh: "Chinese",
   bn: "Bengali",
   ur: "Urdu",
+  ms: "Malay",
+  nl: "Dutch",
+  pl: "Polish",
 };
 
-// Translate → target language
+/* ================= TRANSLATE ================= */
 async function translate(text, targetLang) {
   const res = await axios.get(
     "https://translate.googleapis.com/translate_a/single",
@@ -43,33 +45,34 @@ async function translate(text, targetLang) {
       timeout: 15000,
     }
   );
+
   return (res.data?.[0] || []).map((x) => x?.[0]).join("") || "";
 }
 
-// Generate voice note
+/* ================= SEND VOICE ================= */
 async function sendVoice(conn, mek, m, text, lang) {
   const outDir = path.join(process.cwd(), "tmp");
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
   const outFile = path.join(outDir, `${Date.now()}.mp3`);
 
-  // ✅ Sinhala supported here
-  const url = googleTTS.getAudioUrl(text, {
+  // ✅ Sinhala + many languages supported
+  const ttsUrl = googleTTS.getAudioUrl(text, {
     lang,
     slow: false,
     host: "https://translate.google.com",
   });
 
-  const res = await fetch(url);
-  const buffer = await res.buffer();
-  fs.writeFileSync(outFile, buffer);
+  // download audio using axios (no fetch)
+  const res = await axios.get(ttsUrl, { responseType: "arraybuffer" });
+  fs.writeFileSync(outFile, Buffer.from(res.data));
 
   await conn.sendMessage(
     m.chat,
     {
       audio: fs.readFileSync(outFile),
       mimetype: "audio/mpeg",
-      ptt: true,
+      ptt: true, // voice note style
     },
     { quoted: mek }
   );
@@ -77,19 +80,20 @@ async function sendVoice(conn, mek, m, text, lang) {
   fs.unlinkSync(outFile);
 }
 
-/* ================= HELP ================= */
+/* ================= HELP COMMAND ================= */
 cmd(
   {
-    pattern: "tts",
-    alias: ["voice"],
-    desc: "Translate text and send voice (.tts<lang>)",
+    pattern: "tr",
+    alias: ["voice", "tts"],
+    desc: "Translate text and send as voice (.tts<lang>)",
     category: "utility",
     react: "🗣️",
     filename: __filename,
   },
   async (conn, mek, m, { reply }) => {
     return reply(
-      "✅ Usage:\n" +
+      "🗣️ *Text to Voice*\n\n" +
+        "Usage:\n" +
         ".tts<lang> <text>\n\n" +
         "Examples:\n" +
         ".ttssi mama oyata adarei\n" +
@@ -101,14 +105,14 @@ cmd(
   }
 );
 
-/* ================= REGISTER COMMANDS ================= */
+/* ================= REGISTER ALL .tts<lang> ================= */
 for (const code of Object.keys(LANGS)) {
   const langName = LANGS[code];
 
   cmd(
     {
-      pattern: `tts${code}`,
-      alias: [`voice${code}`],
+      pattern: `tts${code}`,        // .ttssi
+      alias: [`voice${code}`],      // .voicesi
       desc: `Translate to ${langName} and send voice`,
       category: "utility",
       react: "🗣️",
@@ -117,18 +121,23 @@ for (const code of Object.keys(LANGS)) {
     async (conn, mek, m, { q, reply }) => {
       try {
         if (!q) {
-          return reply(`❌ Please provide text.\nExample: .tts${code} hello`);
+          return reply(
+            `❌ Please provide text.\nExample: .tts${code} hello`
+          );
         }
 
-        await reply(`🔄 Translating to ${langName}...`);
+        await reply(`🔄 Translating to ${langName} from MALIYA-MD...`);
         const translated = await translate(q, code);
-        if (!translated) return reply("❌ Translation failed.");
 
-        await reply("🎙️ Generating voice note...");
+        if (!translated) {
+          return reply("❌ Translation failed. Try again.");
+        }
+
+        await reply("🎙️ Generating voice note form MALIYA-MD...");
         await sendVoice(conn, mek, m, translated, code);
-      } catch (e) {
-        console.error(e);
-        reply("❌ Failed (network blocked / TTS error).");
+      } catch (err) {
+        console.error(err);
+        reply("❌ Failed (network / TTS error).");
       }
     }
   );
