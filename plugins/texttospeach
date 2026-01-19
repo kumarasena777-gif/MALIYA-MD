@@ -1,17 +1,15 @@
 const { cmd } = require("../command");
+const axios = require("axios");
 const gTTS = require("gtts");
 const fs = require("fs");
 const path = require("path");
 
-// 🌍 Language map (20+)
+// Supported languages (add more if you want)
 const LANGS = {
   si: "Sinhala",
   en: "English",
-  hi: "Hindi",
   ta: "Tamil",
-  te: "Telugu",
-  ml: "Malayalam",
-  kn: "Kannada",
+  hi: "Hindi",
   fr: "French",
   de: "German",
   es: "Spanish",
@@ -29,101 +27,91 @@ const LANGS = {
   ur: "Urdu",
 };
 
-// helper
-async function makeTTS(conn, mek, m, reply, text, lang) {
+async function translate(text, targetLang) {
+  const url = "https://translate.googleapis.com/translate_a/single";
+  const res = await axios.get(url, {
+    params: {
+      client: "gtx",
+      sl: "auto",
+      tl: targetLang,
+      dt: "t",
+      q: text,
+    },
+    timeout: 15000,
+  });
+
+  const data = res.data;
+  const out = (data?.[0] || []).map((x) => x?.[0]).join("");
+  return out || "";
+}
+
+async function sendVoice(conn, mek, m, text, lang) {
   const outDir = path.join(process.cwd(), "tmp");
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
   const outFile = path.join(outDir, `${Date.now()}.mp3`);
+  const tts = new gTTS(text, lang);
 
-  const gtts = new gTTS(text, lang);
   await new Promise((res, rej) => {
-    gtts.save(outFile, (err) => (err ? rej(err) : res()));
+    tts.save(outFile, (err) => (err ? rej(err) : res()));
   });
 
   await conn.sendMessage(
     m.chat,
-    {
-      audio: fs.readFileSync(outFile),
-      mimetype: "audio/mpeg",
-      ptt: true, // voice note style
-      caption: `🗣️ TTS (${LANGS[lang] || lang})`,
-    },
+    { audio: fs.readFileSync(outFile), mimetype: "audio/mpeg", ptt: true },
     { quoted: mek }
   );
 
   fs.unlinkSync(outFile);
 }
 
-/* ================= SINHALA ================= */
-cmd(
-  {
-    pattern: "ttssi",
-    alias: ["voicesi"],
-    desc: "Text to Speech (Sinhala)",
-    category: "utility",
-    react: "🗣️",
-    filename: __filename,
-  },
-  async (conn, mek, m, { q, reply }) => {
-    if (!q) return reply("❌ Please provide Sinhala text.\nExample: .ttssi මට සින්හල කථා කරන්න");
-    try {
-      await makeTTS(conn, mek, m, reply, q, "si");
-    } catch (e) {
-      reply("❌ Failed to convert Sinhala text to voice.");
-    }
-  }
-);
-
-/* ================= ENGLISH ================= */
-cmd(
-  {
-    pattern: "ttsen",
-    alias: ["voiceen"],
-    desc: "Text to Speech (English)",
-    category: "utility",
-    react: "🗣️",
-    filename: __filename,
-  },
-  async (conn, mek, m, { q, reply }) => {
-    if (!q) return reply("❌ Please provide English text.\nExample: .ttsen Hello how are you");
-    try {
-      await makeTTS(conn, mek, m, reply, q, "en");
-    } catch (e) {
-      reply("❌ Failed to convert English text to voice.");
-    }
-  }
-);
-
-/* ================= MULTI LANGUAGE ================= */
+// ✅ One handler for all ".tts<lang>"
 cmd(
   {
     pattern: "tts",
     alias: ["voice"],
-    desc: "Text to Speech (multi-language)",
+    desc: "Translate to a language and send as voice (Use: .tts<lang> text)",
     category: "utility",
     react: "🗣️",
     filename: __filename,
   },
-  async (conn, mek, m, { args, reply }) => {
-    if (args.length < 2) {
-      return reply(
-        "❌ Usage:\n.tts <lang> <text>\n\nExample:\n.tts fr Bonjour\n.tts ja こんにちは\n\nAvailable langs:\n" +
-        Object.keys(LANGS).join(", ")
-      );
-    }
-
-    const lang = args[0].toLowerCase();
-    const text = args.slice(1).join(" ");
-
-    if (!LANGS[lang]) {
-      return reply("❌ Unsupported language code.\nAvailable:\n" + Object.keys(LANGS).join(", "));
-    }
-
+  async (conn, mek, m, { body, reply }) => {
     try {
-      await makeTTS(conn, mek, m, reply, text, lang);
+      // body example: ".ttssi mama oyata adarei"
+      const cmdText = body.trim();
+      const match = cmdText.match(/^\.(tts|voice)([a-z]{2})\s+([\s\S]+)$/i);
+
+      if (!match) {
+        return reply(
+          "❌ Usage:\n.tts<lang> <text>\n\nExamples:\n.ttssi mama oyata adarei\n.ttsen kohomada oyage day?\n.ttsfr mama oyata adarei\n\nSupported lang codes:\n" +
+            Object.keys(LANGS).join(", ")
+        );
+      }
+
+      const lang = match[2].toLowerCase();
+      const inputText = match[3].trim();
+
+      if (!LANGS[lang]) {
+        return reply(
+          "❌ Unsupported language code.\nSupported:\n" + Object.keys(LANGS).join(", ")
+        );
+      }
+
+      if (!inputText) return reply("❌ Please provide text.");
+
+      await reply(`🔄 Translating to ${LANGS[lang]}...`);
+      const translated = await translate(inputText, lang);
+
+      if (!translated) return reply("❌ Translation failed. Try again.");
+
+      // Optional: show translated text
+      // await reply(`✅ Translated: ${translated}`);
+
+      await reply("🎙️ Generating voice note...");
+      await sendVoice(conn, mek, m, translated, lang);
     } catch (e) {
-      reply("❌ Failed to convert text to voice.");
+      console.error(e);
+      reply("❌ Failed (network blocked / translate endpoint error).");
     }
   }
 );
