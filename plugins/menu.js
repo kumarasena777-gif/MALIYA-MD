@@ -1,6 +1,4 @@
- const { cmd, commands } = require("../command");
-const fs = require("fs");
-const path = require("path");
+const { cmd, commands } = require("../command");
 
 const pendingMenu = {};
 const numberEmojis = ["0️⃣","1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣"];
@@ -37,40 +35,41 @@ cmd({
   });
 
   menuText += `───────────────────────\n`;
-  menuText += `Reply with a number to view commands.\n`;
+  menuText += `Reply like: *.1* or *.2* to view commands.\n`;
 
   await test.sendMessage(from, {
     image: { url: headerImage },
     caption: menuText,
   }, { quoted: m });
 
-  // ✅ Key sender normalize (some frameworks give different sender formats)
   const key = (sender || "").split(":")[0];
   pendingMenu[key] = { step: "category", commandMap, categories };
 });
 
 
 /**
- * ✅ IMPORTANT FIX:
- * Instead of cmd({ filter: ... }) we use a number pattern,
- * then inside we check pendingMenu is active for that sender.
+ * ✅ FIX: Make number selection a command (prefix required)
+ * Users must reply: .1  .2  .10
  */
 cmd({
-  pattern: "^(\\d+)$",           // user reply "1", "2", "10" etc.
+  pattern: "([0-9]+)",          // catches .1, .2, .10 etc (because it's a command)
   dontAddCommandList: true,
   filename: __filename
 }, async (test, m, msg, { from, body, sender, reply }) => {
 
   const key = (sender || "").split(":")[0];
-
-  // ✅ If menu is not pending, ignore silently
   if (!pendingMenu[key] || pendingMenu[key].step !== "category") return;
 
   await test.sendMessage(from, { react: { text: "✅", key: m.key } });
 
   const { commandMap, categories } = pendingMenu[key];
 
-  const index = parseInt((body || "").trim(), 10) - 1;
+  // body contains the whole message text; for commands it may include prefix.
+  // We'll extract first number from body.
+  const match = (body || "").match(/\d+/);
+  if (!match) return reply("❌ Invalid selection.");
+
+  const index = parseInt(match[0], 10) - 1;
   if (isNaN(index) || index < 0 || index >= categories.length) {
     return reply("❌ Invalid selection.");
   }
