@@ -7,10 +7,16 @@ const axios = require("axios");
 const API_KEY = "AIzaSyDEpXKpIJ3A3UsmytcqA7VGSOst1vX8tow";
 
 // =========================
-// ✅ FIXED MODEL NAME
+// ✅ Model candidates (try in order)
 // =========================
-// Try flash first. If you still get 404, switch to "gemini-1.5-pro-001".
-const GEMINI_MODEL = "gemini-1.5-flash-001";
+// Primary: Gemini 2.5 Flash (official docs examples)
+// Fallback: "gemini-flash-latest" alias (works in many setups)
+const MODEL_CANDIDATES = [
+  "gemini-2.5-flash",
+  "gemini-flash-latest",
+  "gemini-2.5-pro",
+  "gemini-pro-latest",
+];
 
 // =========================
 // 🌍 Languages (50)
@@ -29,6 +35,9 @@ const LANGUAGES = {
   ga: "Irish", mt: "Maltese", km: "Khmer"
 };
 
+// =========================
+// 🧠 Prompt builder (keep short; English-only bot messages)
+// =========================
 function buildPrompt(language, topic) {
   let p = `Write a well-structured essay in ${language}. Topic: ${topic}.`;
 
@@ -42,20 +51,80 @@ function buildPrompt(language, topic) {
   return p;
 }
 
+// =========================
+// 🤖 Gemini generateContent with model fallback
+// Uses x-goog-api-key header (recommended in docs)
+// =========================
 async function generateEssay(prompt) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${API_KEY}`;
+  let lastErr = null;
 
-  const res = await axios.post(
-    url,
-    {
-      contents: [{ parts: [{ text: prompt }] }]
-    },
-    { timeout: 30000 }
-  );
+  for (const model of MODEL_CANDIDATES) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
-  return res?.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      const res = await axios.post(
+        url,
+        { contents: [{ parts: [{ text: prompt }] }] },
+        {
+          timeout: 30000,
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": API_KEY,
+          },
+        }
+      );
+
+      const out = res?.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (out && out.length > 10) return out;
+
+      lastErr = new Error("Empty response");
+    } catch (e) {
+      lastErr = e;
+      // If model not found, try next candidate
+      const status = e?.response?.status;
+      if (status !== 404) break; // non-404 errors: stop and report
+    }
+  }
+
+  throw lastErr || new Error("Unknown Gemini error");
 }
 
+// =========================
+// Optional: list models command (helps debugging)
+// .gemodels
+// =========================
+cmd(
+  {
+    pattern: "gemodels",
+    desc: "List available Gemini models (first results)",
+    category: "AI",
+    react: "📜",
+    filename: __filename
+  },
+  async (conn, mek, m, { from, reply }) => {
+    try {
+      const url = "https://generativelanguage.googleapis.com/v1beta/models";
+      const res = await axios.get(url, {
+        timeout: 30000,
+        headers: { "x-goog-api-key": API_KEY }
+      });
+
+      const names = (res?.data?.models || [])
+        .map(x => x.name)
+        .slice(0, 30);
+
+      if (!names.length) return reply("No models returned by the API.");
+      return reply("Available models (first 30):\n\n" + names.join("\n"));
+    } catch (e) {
+      console.error("GEMODELS ERROR:", e?.response?.data || e?.message || e);
+      reply("Failed to list models.");
+    }
+  }
+);
+
+// =========================
+// Auto-create commands: .decsi .decen .decja ...
+// =========================
 Object.entries(LANGUAGES).forEach(([code, language]) => {
   cmd(
     {
@@ -72,23 +141,17 @@ Object.entries(LANGUAGES).forEach(([code, language]) => {
         await reply(`Generating ${language} essay...`);
 
         const essay = await generateEssay(buildPrompt(language, q));
-        if (!essay) throw new Error("Empty response from Gemini");
-
         const text = `📝 ${language} Essay\n\nTopic: ${q}\n\n${essay}`;
-        await conn.sendMessage(from, { text }, { quoted: mek });
 
+        await conn.sendMessage(from, { text }, { quoted: mek });
       } catch (err) {
         const status = err?.response?.status;
-        const data = err?.response?.data;
+        console.error("GEMINI ERROR STATUS:", status);
+        console.error("GEMINI ERROR:", err?.response?.data || err?.message || err);
 
-        console.error("GEMINI STATUS:", status);
-        console.error("GEMINI DATA:", data || err?.message || err);
-
-        // Helpful hint for 404 model errors
         if (status === 404) {
           return reply(
-            "Model not found for this API version.\n" +
-            "Edit GEMINI_MODEL to 'gemini-1.5-pro-001' (or list models) and try again."
+            "Model not found.\nRun .gemodels and use one of the returned models."
           );
         }
 
