@@ -1,64 +1,76 @@
+
 const { cmd, commands } = require("../command");
+const fs = require("fs");
+const path = require("path");
 
-let cachedMenu = null; // cache
+const pendingMenu = {};
+const numberEmojis = ["0️⃣","1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣"];
 
-function generateMenu() {
-  const categories = {};
+const headerImage = "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/web%20pair%20backgroun%20img.png";
 
-  for (let cmdName in commands) {
-    const cmdData = commands[cmdName];
-    const cat = cmdData.category?.toLowerCase() || "other";
-    if (!categories[cat]) categories[cat] = [];
-    categories[cat].push({
-      pattern: cmdData.pattern,
-      desc: cmdData.desc || "No description"
-    });
+cmd({
+  pattern: "menu",
+  react: "📜",
+  desc: "Show command categories",
+  category: "main",
+  filename: __filename
+}, async (test, m, msg, { from, sender, reply }) => {
+  await test.sendMessage(from, { react: { text: "📜", key: m.key } });
+
+  const commandMap = {};
+
+  for (const command of commands) {
+    if (command.dontAddCommandList) continue;
+    const category = (command.category || "MISC").toUpperCase();
+    if (!commandMap[category]) commandMap[category] = [];
+    commandMap[category].push(command);
   }
 
-  let menuText = "📜 *Available Commands!:*\n";
+  const categories = Object.keys(commandMap);
 
-  for (const [cat, cmds] of Object.entries(categories)) {
-    menuText += `\n⭕ *${cat.toUpperCase()}*\n`;
-    cmds.forEach(c => {
-      menuText += `- .${c.pattern} : ${c.desc}\n`;
-    });
-  }
+  let menuText = `*MAIN MENU FOR MALIYA-MD*\n`;
+  menuText += `───────────────────────\n`;
 
-  return menuText.trim();
-}
+  categories.forEach((cat, i) => {
+    const emojiIndex = (i + 1).toString().split("").map(n => numberEmojis[n]).join("");
+    menuText += `┃ ${emojiIndex} *${cat}* (${commandMap[cat].length})\n`;
+  });
 
-cmd(
-  {
-    pattern: "menu",
-    desc: "Displays all available commands to use MALIYA-MD",
-    category: "main",
-    filename: __filename,
-  },
-  async (bot, mek, m, { from, reply }) => {
-    try {
+  menuText += `───────────────────────\n`;
 
-      // Generate once only
-      if (!cachedMenu) cachedMenu = generateMenu();
+  await test.sendMessage(from, {
+    image: { url: headerImage },
+    caption: menuText,
+  }, { quoted: m });
 
-      // React
-      await bot.sendMessage(from, { react: { text: "📜", key: mek.key } });
+  pendingMenu[sender] = { step: "category", commandMap, categories };
+});
 
-      // Image + Cached Menu send
-      await bot.sendMessage(
-        from,
-        {
-          image: {
-            url: "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png?raw=true",
-          },
-          caption: cachedMenu,
-        },
-        { quoted: mek }
-      );
+cmd({
+  filter: (text, { sender }) => pendingMenu[sender] && pendingMenu[sender].step === "category" && /^[1-9][0-9]*$/.test(text.trim())
+}, async (test, m, msg, { from, body, sender, reply }) => {
+  await test.sendMessage(from, { react: { text: "✅", key: m.key } });
 
-    } catch (err) {
-      console.error(err);
-      reply("❌ Error generating menu.");
-    }
-  }
-);
+  const { commandMap, categories } = pendingMenu[sender];
+  const index = parseInt(body.trim()) - 1;
+  if (index < 0 || index >= categories.length) return reply("❌ Invalid selection.");
+
+  const selectedCategory = categories[index];
+  const cmdsInCategory = commandMap[selectedCategory];
+
+  let cmdText = `*${selectedCategory} COMMANDS*\n`;
+  cmdsInCategory.forEach(c => {
+    const patterns = [c.pattern, ...(c.alias || [])].filter(Boolean).map(p => `.${p}`);
+    cmdText += `${patterns.join(", ")} - ${c.desc || "No description"}\n`;
+  });
+  cmdText += `───────────────────────\n`;
+  cmdText += `Total Commands: ${cmdsInCategory.length}\n`;
+
+  await test.sendMessage(from, {
+    image: { url: headerImage },
+    caption: cmdText,
+  }, { quoted: m });
+
+  delete pendingMenu[sender];
+});
 
