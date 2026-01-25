@@ -7,7 +7,7 @@ const axios = require("axios");
 const API_KEY = "AIzaSyDEpXKpIJ3A3UsmytcqA7VGSOst1vX8tow";
 
 // =========================
-// 🌍 Languages (50)
+// 🌍 Languages
 // =========================
 const LANGUAGES = {
   si: "Sinhala",
@@ -78,11 +78,11 @@ function buildPrompt(language, topic) {
 }
 
 // =========================
-// 🤖 Gemini API call
+// 🤖 Gemini API call (FIXED)
 // =========================
 async function generateEssay(prompt) {
   const res = await axios.post(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.0-pro:generateContent?key=${API_KEY}`,
     {
       contents: [
         {
@@ -97,7 +97,7 @@ async function generateEssay(prompt) {
 }
 
 // =========================
-// ⚙️ Commands auto-create
+// ⚙️ Commands
 // =========================
 Object.entries(LANGUAGES).forEach(([code, language]) => {
   cmd(
@@ -110,14 +110,12 @@ Object.entries(LANGUAGES).forEach(([code, language]) => {
     },
     async (conn, mek, m, { from, q, reply }) => {
       try {
-        if (!q) {
-          return reply(`Usage:\n.dec${code} <topic>`);
-        }
+        if (!q) return reply(`Usage:\n.dec${code} <topic>`);
 
         await reply(`Generating ${language} essay...`);
 
         const essay = await generateEssay(buildPrompt(language, q));
-        if (!essay) throw new Error("Empty response from Gemini");
+        if (!essay) throw new Error("Empty response");
 
         const text =
 `📝 ${language} Essay
