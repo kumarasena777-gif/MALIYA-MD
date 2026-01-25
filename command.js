@@ -2,17 +2,17 @@ const commands = [];
 const replyHandlers = [];
 
 function cmd(info, func) {
-    const data = info;
+    const data = { ...info };
     data.function = func;
 
     // Normalize pattern
     if (data.pattern) {
-        data.pattern = data.pattern.toLowerCase();
+        data.pattern = String(data.pattern).toLowerCase();
         commands.push(data);
-    } 
-    
-    // Reply handlers without prefix
-    else if (typeof data.filter === "function") {
+    }
+
+    // Reply handlers without prefix (also allow commands that have both pattern + filter)
+    if (typeof data.filter === "function") {
         replyHandlers.push(data);
     }
 
