@@ -7,88 +7,48 @@ const axios = require("axios");
 const API_KEY = "AIzaSyDEpXKpIJ3A3UsmytcqA7VGSOst1vX8tow";
 
 // =========================
-// 🌍 Languages
+// ✅ FIXED MODEL NAME
+// =========================
+// Try flash first. If you still get 404, switch to "gemini-1.5-pro-001".
+const GEMINI_MODEL = "gemini-1.5-flash-001";
+
+// =========================
+// 🌍 Languages (50)
 // =========================
 const LANGUAGES = {
-  si: "Sinhala",
-  en: "English",
-  ta: "Tamil",
-  hi: "Hindi",
-  ja: "Japanese",
-  zh: "Chinese",
-  ko: "Korean",
-  fr: "French",
-  de: "German",
-  es: "Spanish",
-  it: "Italian",
-  pt: "Portuguese",
-  ru: "Russian",
-  ar: "Arabic",
-  bn: "Bengali",
-  ur: "Urdu",
-  fa: "Persian",
-  tr: "Turkish",
-  nl: "Dutch",
-  sv: "Swedish",
-  no: "Norwegian",
-  da: "Danish",
-  fi: "Finnish",
-  pl: "Polish",
-  cs: "Czech",
-  ro: "Romanian",
-  hu: "Hungarian",
-  el: "Greek",
-  he: "Hebrew",
-  th: "Thai",
-  vi: "Vietnamese",
-  id: "Indonesian",
-  ms: "Malay",
-  tl: "Filipino",
-  sw: "Swahili",
-  zu: "Zulu",
-  af: "Afrikaans",
-  uk: "Ukrainian",
-  sr: "Serbian",
-  hr: "Croatian",
-  sk: "Slovak",
-  sl: "Slovenian",
-  lt: "Lithuanian",
-  lv: "Latvian",
-  et: "Estonian",
-  is: "Icelandic",
-  ga: "Irish",
-  mt: "Maltese",
-  km: "Khmer"
+  si: "Sinhala", en: "English", ta: "Tamil", hi: "Hindi", ja: "Japanese",
+  zh: "Chinese", ko: "Korean", fr: "French", de: "German", es: "Spanish",
+  it: "Italian", pt: "Portuguese", ru: "Russian", ar: "Arabic", bn: "Bengali",
+  ur: "Urdu", fa: "Persian", tr: "Turkish", nl: "Dutch", sv: "Swedish",
+  no: "Norwegian", da: "Danish", fi: "Finnish", pl: "Polish", cs: "Czech",
+  ro: "Romanian", hu: "Hungarian", el: "Greek", he: "Hebrew", th: "Thai",
+  vi: "Vietnamese", id: "Indonesian", ms: "Malay", tl: "Filipino",
+  sw: "Swahili", zu: "Zulu", af: "Afrikaans", uk: "Ukrainian",
+  sr: "Serbian", hr: "Croatian", sk: "Slovak", sl: "Slovenian",
+  lt: "Lithuanian", lv: "Latvian", et: "Estonian", is: "Icelandic",
+  ga: "Irish", mt: "Maltese", km: "Khmer"
 };
 
-// =========================
-// 🧠 Prompt builder
-// =========================
 function buildPrompt(language, topic) {
-  let prompt = `Write a well-structured essay in ${language}. Topic: ${topic}.`;
+  let p = `Write a well-structured essay in ${language}. Topic: ${topic}.`;
 
   if (language === "Sinhala" && /[a-zA-Z]/.test(topic)) {
-    prompt += " The topic may be written in Singlish. Convert it to proper Sinhala first.";
+    p += " The topic may be written in Singlish. Convert it to proper Sinhala first.";
   } else {
-    prompt += " Write only in the requested language.";
+    p += " Write only in the requested language.";
   }
 
-  prompt += " Include introduction, body, and conclusion. Medium length.";
-  return prompt;
+  p += " Include introduction, body, and conclusion. Medium length.";
+  return p;
 }
 
-// =========================
-// 🤖 Gemini API call (FIXED)
-// =========================
 async function generateEssay(prompt) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${API_KEY}`;
+
   const res = await axios.post(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.0-pro:generateContent?key=${API_KEY}`,
+    url,
     {
-      contents: [
-        {
-          parts: [{ text: prompt }]
-        }
-      ]
+      contents: [{ parts: [{ text: prompt }] }]
     },
     { timeout: 30000 }
   );
@@ -96,9 +56,6 @@ async function generateEssay(prompt) {
   return res?.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
 }
 
-// =========================
-// ⚙️ Commands
-// =========================
 Object.entries(LANGUAGES).forEach(([code, language]) => {
   cmd(
     {
@@ -115,19 +72,26 @@ Object.entries(LANGUAGES).forEach(([code, language]) => {
         await reply(`Generating ${language} essay...`);
 
         const essay = await generateEssay(buildPrompt(language, q));
-        if (!essay) throw new Error("Empty response");
+        if (!essay) throw new Error("Empty response from Gemini");
 
-        const text =
-`📝 ${language} Essay
-
-Topic: ${q}
-
-${essay}`;
-
+        const text = `📝 ${language} Essay\n\nTopic: ${q}\n\n${essay}`;
         await conn.sendMessage(from, { text }, { quoted: mek });
 
       } catch (err) {
-        console.error("GEMINI ERROR:", err?.response?.data || err?.message || err);
+        const status = err?.response?.status;
+        const data = err?.response?.data;
+
+        console.error("GEMINI STATUS:", status);
+        console.error("GEMINI DATA:", data || err?.message || err);
+
+        // Helpful hint for 404 model errors
+        if (status === 404) {
+          return reply(
+            "Model not found for this API version.\n" +
+            "Edit GEMINI_MODEL to 'gemini-1.5-pro-001' (or list models) and try again."
+          );
+        }
+
         reply("Failed to generate the essay. Please try again later.");
       }
     }
