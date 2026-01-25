@@ -1,16 +1,13 @@
 const { cmd } = require("../command");
 const axios = require("axios");
 
-// =========================
-// 🔑 GEMINI API KEY (TEST)
-// =========================
-const API_KEY = "AIzaSyDEpXKpIJ3A3UsmytcqA7VGSOst1vX8tow";
+// ✅ Read key from GitHub Actions secret/env (DO NOT hardcode)
+const API_KEY = process.env.GEMINI_API_KEY;
+if (!API_KEY) console.error("GEMINI_API_KEY is not set");
 
 // =========================
 // ✅ Model candidates (try in order)
 // =========================
-// Primary: Gemini 2.5 Flash (official docs examples)
-// Fallback: "gemini-flash-latest" alias (works in many setups)
 const MODEL_CANDIDATES = [
   "gemini-2.5-flash",
   "gemini-flash-latest",
@@ -36,7 +33,7 @@ const LANGUAGES = {
 };
 
 // =========================
-// 🧠 Prompt builder (keep short; English-only bot messages)
+// 🧠 Prompt builder
 // =========================
 function buildPrompt(language, topic) {
   let p = `Write a well-structured essay in ${language}. Topic: ${topic}.`;
@@ -53,9 +50,13 @@ function buildPrompt(language, topic) {
 
 // =========================
 // 🤖 Gemini generateContent with model fallback
-// Uses x-goog-api-key header (recommended in docs)
+// Uses x-goog-api-key header
 // =========================
 async function generateEssay(prompt) {
+  if (!API_KEY) {
+    throw new Error("Missing GEMINI_API_KEY (set it in GitHub Actions Secrets and workflow env)");
+  }
+
   let lastErr = null;
 
   for (const model of MODEL_CANDIDATES) {
@@ -77,12 +78,16 @@ async function generateEssay(prompt) {
       const out = res?.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
       if (out && out.length > 10) return out;
 
-      lastErr = new Error("Empty response");
+      lastErr = new Error("Empty response from Gemini");
     } catch (e) {
       lastErr = e;
-      // If model not found, try next candidate
       const status = e?.response?.status;
-      if (status !== 404) break; // non-404 errors: stop and report
+
+      // If model not found, try next model
+      if (status === 404) continue;
+
+      // Other errors -> stop (quota, permission, etc.)
+      break;
     }
   }
 
@@ -90,33 +95,32 @@ async function generateEssay(prompt) {
 }
 
 // =========================
-// Optional: list models command (helps debugging)
-// .gemodels
+// .gemodels (debug)
 // =========================
 cmd(
   {
-    pattern: "gemodels",
-    desc: "List available Gemini models (first results)",
+    pattern: "dechelp",
+    desc: "List available Gemini models (first 30)",
     category: "AI",
     react: "📜",
     filename: __filename
   },
   async (conn, mek, m, { from, reply }) => {
     try {
+      if (!API_KEY) return reply("GEMINI_API_KEY is not set.");
+
       const url = "https://generativelanguage.googleapis.com/v1beta/models";
       const res = await axios.get(url, {
         timeout: 30000,
         headers: { "x-goog-api-key": API_KEY }
       });
 
-      const names = (res?.data?.models || [])
-        .map(x => x.name)
-        .slice(0, 30);
-
+      const names = (res?.data?.models || []).map(x => x.name).slice(0, 30);
       if (!names.length) return reply("No models returned by the API.");
+
       return reply("Available models (first 30):\n\n" + names.join("\n"));
     } catch (e) {
-      console.error("GEMODELS ERROR:", e?.response?.data || e?.message || e);
+      console.error("GEMODELS ERROR:", e?.response?.status, e?.response?.data || e?.message || e);
       reply("Failed to list models.");
     }
   }
@@ -146,13 +150,19 @@ Object.entries(LANGUAGES).forEach(([code, language]) => {
         await conn.sendMessage(from, { text }, { quoted: mek });
       } catch (err) {
         const status = err?.response?.status;
-        console.error("GEMINI ERROR STATUS:", status);
-        console.error("GEMINI ERROR:", err?.response?.data || err?.message || err);
+        const data = err?.response?.data;
 
+        console.error("GEMINI ERROR STATUS:", status);
+        console.error("GEMINI ERROR:", data || err?.message || err);
+
+        if (status === 403) {
+          return reply("Gemini permission denied (check key/quota).");
+        }
+        if (status === 429) {
+          return reply("Gemini rate limit exceeded. Try again later.");
+        }
         if (status === 404) {
-          return reply(
-            "Model not found.\nRun .gemodels and use one of the returned models."
-          );
+          return reply("Models not found. Run .gemodels and try again.");
         }
 
         reply("Failed to generate the essay. Please try again later.");
