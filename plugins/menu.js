@@ -6,17 +6,21 @@ const numberEmojis = ["0️⃣","1️⃣","2️⃣","3️⃣","4️⃣","5️⃣
 const headerImage =
   "https://raw.githubusercontent.com/Maliya-bro/MALIYA-MD/refs/heads/main/images/a1b18d21-fd72-43cb-936b-5b9712fb9af0.png";
 
+function normalizeSender(s = "") {
+  return (s || "").split(":")[0]; // remove device part
+}
+
 cmd({
   pattern: "menu",
   react: "📜",
   desc: "Show command categories",
   category: "main",
   filename: __filename
-}, async (test, m, msg, { from, sender, reply }) => {
-  await test.sendMessage(from, { react: { text: "📜", key: m.key } });
+}, async (test, mek, m, { from, sender, reply }) => {
+
+  await test.sendMessage(from, { react: { text: "📜", key: mek.key } });
 
   const commandMap = {};
-
   for (const command of commands) {
     if (command.dontAddCommandList) continue;
     const category = (command.category || "MISC").toUpperCase();
@@ -35,45 +39,40 @@ cmd({
   });
 
   menuText += `───────────────────────\n`;
-  menuText += `Reply like: *.1* or *.2* to view commands.\n`;
+  menuText += `*Reply with a number (1-${categories.length})*`;
 
   await test.sendMessage(from, {
     image: { url: headerImage },
     caption: menuText,
-  }, { quoted: m });
+  }, { quoted: mek });
 
-  const key = (sender || "").split(":")[0];
-  pendingMenu[key] = { step: "category", commandMap, categories };
+  // ✅ IMPORTANT: store with normalized sender
+  const key = normalizeSender(sender);
+  pendingMenu[key] = { step: "category", commandMap, categories, timestamp: Date.now() };
 });
 
-
-/**
- * ✅ FIX: Make number selection a command (prefix required)
- * Users must reply: .1  .2  .10
- */
 cmd({
-  pattern: "([0-9]+)",          // catches .1, .2, .10 etc (because it's a command)
+  // ✅ SAME STYLE AS YOUR FILM PLUGIN
+  filter: (text, { sender }) => {
+    const key = (sender || "").split(":")[0];
+    const t = (text || "").trim();
+
+    if (!pendingMenu[key] || pendingMenu[key].step !== "category") return false;
+    if (isNaN(t)) return false;
+
+    const n = parseInt(t, 10);
+    return n > 0 && n <= pendingMenu[key].categories.length;
+  },
   dontAddCommandList: true,
   filename: __filename
-}, async (test, m, msg, { from, body, sender, reply }) => {
+}, async (test, mek, m, { body, sender, reply, from }) => {
 
-  const key = (sender || "").split(":")[0];
-  if (!pendingMenu[key] || pendingMenu[key].step !== "category") return;
+  await test.sendMessage(from, { react: { text: "✅", key: mek.key } });
 
-  await test.sendMessage(from, { react: { text: "✅", key: m.key } });
-
+  const key = normalizeSender(sender);
   const { commandMap, categories } = pendingMenu[key];
 
-  // body contains the whole message text; for commands it may include prefix.
-  // We'll extract first number from body.
-  const match = (body || "").match(/\d+/);
-  if (!match) return reply("❌ Invalid selection.");
-
-  const index = parseInt(match[0], 10) - 1;
-  if (isNaN(index) || index < 0 || index >= categories.length) {
-    return reply("❌ Invalid selection.");
-  }
-
+  const index = parseInt((body || "").trim(), 10) - 1;
   const selectedCategory = categories[index];
   const cmdsInCategory = commandMap[selectedCategory];
 
@@ -93,7 +92,18 @@ cmd({
   await test.sendMessage(from, {
     image: { url: headerImage },
     caption: cmdText,
-  }, { quoted: m });
+  }, { quoted: mek });
 
   delete pendingMenu[key];
 });
+
+// auto cleanup
+setInterval(() => {
+  const now = Date.now();
+  const timeout = 10 * 60 * 1000;
+  for (const s in pendingMenu) {
+    if (now - pendingMenu[s].timestamp > timeout) delete pendingMenu[s];
+  }
+}, 5 * 60 * 1000);
+
+module.exports = { pendingMenu };
