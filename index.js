@@ -1,5 +1,4 @@
-// index.js (FULL CODE) ✅ Status Auto Seen + React FIXED (Baileys)
-// ---------------------------------------------------------------
+// index.js (FULL) ✅ Baileys Latest: Status Auto Seen + React FIXED with statusJidList
 
 const {
   default: makeWASocket,
@@ -7,19 +6,7 @@ const {
   DisconnectReason,
   jidNormalizedUser,
   getContentType,
-  proto,
-  generateWAMessageContent,
-  generateWAMessage,
-  AnyMessageContent,
-  prepareWAMessageMedia,
-  areJidsSameUser,
   downloadContentFromMessage,
-  MessageRetryMap,
-  generateForwardMessageContent,
-  generateWAMessageFromContent,
-  generateMessageID,
-  makeInMemoryStore,
-  jidDecode,
   fetchLatestBaileysVersion,
   Browsers,
 } = require("@whiskeysockets/baileys");
@@ -27,24 +14,11 @@ const {
 const fs = require("fs");
 const P = require("pino");
 const express = require("express");
-const axios = require("axios");
 const path = require("path");
-const qrcode = require("qrcode-terminal");
+const { File } = require("megajs");
 
 const config = require("./config");
-const { sms, downloadMediaMessage } = require("./lib/msg");
-const {
-  getBuffer,
-  getGroupAdmins,
-  getRandom,
-  h2k,
-  isUrl,
-  Json,
-  runtime,
-  sleep,
-  fetchJson,
-} = require("./lib/functions");
-const { File } = require("megajs");
+const { sms } = require("./lib/msg");
 const { commands, replyHandlers } = require("./command");
 
 const app = express();
@@ -52,37 +26,33 @@ const port = process.env.PORT || 8000;
 
 const prefix = ".";
 const ownerNumber = ["94701369636"];
+
 const authDir = path.join(__dirname, "/auth_info_baileys/");
 const credsPath = path.join(authDir, "creds.json");
 
 /* ================= SESSION CHECK ================= */
 async function ensureSessionFile() {
-  try {
-    if (!fs.existsSync(credsPath)) {
-      if (!config.SESSION_ID) {
-        console.error("❌ SESSION_ID missing");
+  if (!fs.existsSync(credsPath)) {
+    if (!config.SESSION_ID) {
+      console.error("❌ SESSION_ID missing");
+      process.exit(1);
+    }
+
+    console.log("🔄 Downloading session from MEGA...");
+    const filer = File.fromURL(`https://mega.nz/file/${config.SESSION_ID}`);
+
+    filer.download((err, data) => {
+      if (err) {
+        console.error("❌ Session download failed:", err);
         process.exit(1);
       }
-
-      console.log("🔄 Downloading session from MEGA...");
-      const filer = File.fromURL(`https://mega.nz/file/${config.SESSION_ID}`);
-
-      filer.download((err, data) => {
-        if (err) {
-          console.error("❌ Session download failed:", err);
-          process.exit(1);
-        }
-        fs.mkdirSync(authDir, { recursive: true });
-        fs.writeFileSync(credsPath, data);
-        console.log("✅ Session restored. Restarting...");
-        setTimeout(connectToWA, 2000);
-      });
-    } else {
-      setTimeout(connectToWA, 1000);
-    }
-  } catch (e) {
-    console.error("❌ ensureSessionFile error:", e);
-    process.exit(1);
+      fs.mkdirSync(authDir, { recursive: true });
+      fs.writeFileSync(credsPath, data);
+      console.log("✅ Session restored. Restarting...");
+      setTimeout(connectToWA, 2000);
+    });
+  } else {
+    setTimeout(connectToWA, 1000);
   }
 }
 
@@ -96,7 +66,6 @@ async function connectToWA() {
   console.log("Connecting MALIYA-MD 🧬...");
 
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
-
   const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
@@ -127,68 +96,63 @@ async function connectToWA() {
     if (connection === "open") {
       console.log("✅ MALIYA-MD connected");
 
-      /* ===== PREMIUM CONNECT MESSAGE ===== */
-      const OWNER_NAME = "Malindu Nadith";
-      const BOT_VERSION = "v4.0.0";
+      // load plugins dynamically
+      try {
+        fs.readdirSync("./plugins/").forEach((plugin) => {
+          if (plugin.endsWith(".js")) require(`./plugins/${plugin}`);
+        });
+      } catch (e) {
+        console.log("⚠️ Plugin load error:", e?.message || e);
+      }
 
-      const now = new Date();
-      const time = new Intl.DateTimeFormat("en-GB", {
-        timeZone: "Asia/Colombo",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: true,
-      }).format(now);
+      // (optional) connect message to owner
+      try {
+        const OWNER_NAME = "Malindu Nadith";
+        const BOT_VERSION = "v4.0.0";
 
-      const date = new Intl.DateTimeFormat("en-GB", {
-        timeZone: "Asia/Colombo",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }).format(now);
+        const now = new Date();
+        const time = new Intl.DateTimeFormat("en-GB", {
+          timeZone: "Asia/Colombo",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: true,
+        }).format(now);
 
-      const up = `
-🌈━━━━━━━━━━━━━━━━━━🌈
-🔥🤖    *MALIYA-MD*   🤖🔥
-🌈━━━━━━━━━━━━━━━━━━🌈
+        const date = new Intl.DateTimeFormat("en-GB", {
+          timeZone: "Asia/Colombo",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(now);
 
-✨ Connection : CONNECTED & ONLINE
-🧬 System     : STABLE | FAST | SECURE
-🛡️ Mode       : PUBLIC
-🎯 Prefix     : ${prefix}
+        const up = `
+🌈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━🌈
+🔥🤖        *MALIYA-MD*         🤖🔥
+🌈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━🌈
 
-👑 Owner     : ${OWNER_NAME}
-🚀 Version    : ${BOT_VERSION}
+✅✨ Connection : CONNECTED & ONLINE
+⚡🧬 System     : STABLE | FAST | SECURE
+🛡️🔐 Mode       : PUBLIC
+🎯🧩 Prefix     : ${prefix}
 
-🕒 Time       : ${time}
-📅 Date       : ${date}
+🧑‍💻👑 Owner     : ${OWNER_NAME}
+🚀📦 Version    : ${BOT_VERSION}
 
-📖 Type  .menu  to start
-🚀 Powered by MALIYA-MD Engine
-🌈━━━━━━━━━━━━━━━━━🌈
+🕒⏳ Time       : ${time}
+📅🗓️ Date       : ${date}
+
+💬📖 Type  .menu  to start
+🌈━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━🌈
 `.trim();
 
-      try {
         await sock.sendMessage(ownerNumber[0] + "@s.whatsapp.net", {
           image: {
             url: "https://github.com/Maliya-bro/MALIYA-MD/blob/main/images/Screenshot%202026-01-18%20122855.png?raw=true",
           },
           caption: up,
         });
-      } catch (e) {
-        console.log("⚠️ Connect msg send failed:", e?.message || e);
-      }
-
-      // load plugins
-      try {
-        fs.readdirSync("./plugins/").forEach((plugin) => {
-          if (plugin.endsWith(".js")) {
-            require(`./plugins/${plugin}`);
-          }
-        });
-      } catch (e) {
-        console.log("⚠️ Plugin load error:", e?.message || e);
-      }
+      } catch {}
     }
   });
 
@@ -217,61 +181,56 @@ async function connectToWA() {
     }
 
     /* ============================================================
-       ✅✅✅ STATUS AUTO SEEN + REACT + FORWARD (FIXED)
+       ✅✅✅ STATUS AUTO SEEN + REACT + FORWARD (Baileys Latest Fix)
        ============================================================ */
     if (mek.key?.remoteJid === "status@broadcast") {
-      const participant = mek.key.participant; // status owner
       const id = mek.key.id;
+      let participant = mek.key.participant;
 
-      // some statuses may not contain participant/id
-      if (!participant || !id) return;
+      // some statuses can miss participant/id
+      if (!id || !participant) return;
 
+      // ✅ normalize participant JID
+      participant = jidNormalizedUser(participant);
       const mentionJid = participant.includes("@s.whatsapp.net")
         ? participant
         : participant + "@s.whatsapp.net";
 
-      // ✅ IMPORTANT: build a proper key for status reactions/reads
-      const statusKey = {
-        remoteJid: "status@broadcast",
-        id,
-        participant,
-        fromMe: false,
-      };
-
-      // ✅ Seen (Most reliable for status)
+      // ✅ SEEN (latest-friendly)
       if (String(config.AUTO_STATUS_SEEN).toLowerCase() === "true") {
         try {
-          // best method
-          await sock.sendReadReceipt("status@broadcast", participant, [id]);
+          // Most reliable for many latest builds
+          await sock.readMessages([mek.key]);
 
-          // fallback (some builds accept this)
+          // extra fallback
           try {
-            await sock.readMessages([statusKey]);
+            await sock.sendReadReceipt("status@broadcast", participant, [id]);
           } catch {}
 
           console.log(`[✓] Status seen: ${id}`);
         } catch (e) {
-          console.error("❌ Failed to mark status as seen:", e?.message || e);
+          console.error("❌ Status seen error:", e?.message || e);
         }
       }
 
-      // ✅ React
+      // ✅ REACT (IMPORTANT: statusJidList)
       if (String(config.AUTO_STATUS_REACT).toLowerCase() === "true") {
         try {
           const emojis = [
-            "❤️","💸","😇","🍂","💥","💯","🔥","💫","💎","💗","🤍","🖤","👀","🙌","🙆","🚩",
-            "🥰","💐","😎","🤎","✅","🫀","🧡","😁","😄","🌸","🕊️","🌷","⛅","🌟","🗿",
-            "💜","💙","🌝","💚"
+            "❤️","💸","😇","🍂","💥","💯","🔥","💫","💎","💗","🤍","🖤","👀","🙌","🚩",
+            "🥰","💐","😎","✅","🧡","😁","😄","🌸","🕊️","🌟","💜","💙","💚"
           ];
           const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
 
-          await sock.sendMessage("status@broadcast", {
-            react: { text: randomEmoji, key: statusKey },
-          });
+          await sock.sendMessage(
+            "status@broadcast",
+            { react: { text: randomEmoji, key: mek.key } },
+            { statusJidList: [participant] } // ✅ KEY FIX
+          );
 
-          console.log(`[✓] Reacted to status of ${participant} with ${randomEmoji}`);
+          console.log(`[✓] Reacted to ${participant} with ${randomEmoji}`);
         } catch (e) {
-          console.error("❌ Failed to react to status:", e?.message || e);
+          console.error("❌ Status react error:", e?.message || e);
         }
       }
 
@@ -290,7 +249,7 @@ async function connectToWA() {
             });
             console.log(`✅ Text-only status from ${mentionJid} forwarded.`);
           } catch (e) {
-            console.error("❌ Failed to forward text status:", e?.message || e);
+            console.error("❌ Forward text status error:", e?.message || e);
           }
         }
       }
@@ -322,11 +281,11 @@ async function connectToWA() {
 
           console.log(`✅ Media status from ${mentionJid} forwarded.`);
         } catch (err) {
-          console.error("❌ Failed to download or forward media status:", err?.message || err);
+          console.error("❌ Forward media status error:", err?.message || err);
         }
       }
 
-      // ✅ status වලට normal command handler run නොවෙන්න
+      // ✅ do not run normal command handler for status
       return;
     }
     /* ===================== END STATUS BLOCK ===================== */
@@ -349,7 +308,7 @@ async function connectToWA() {
 
     const from = mek.key.remoteJid;
     const sender = mek.key.fromMe ? sock.user.id : mek.key.participant || mek.key.remoteJid;
-    const senderNumber = sender.split("@")[0];
+    const senderNumber = (sender || "").split("@")[0];
 
     const isGroup = from.endsWith("@g.us");
     const isOwner = ownerNumber.includes(senderNumber);
@@ -372,7 +331,6 @@ async function connectToWA() {
           if (h.react) {
             sock.sendMessage(from, { react: { text: h.react, key: mek.key } });
           }
-
           return h.function(sock, mek, m, {
             from,
             body,
@@ -398,7 +356,6 @@ async function connectToWA() {
         if (cmd.react) {
           sock.sendMessage(from, { react: { text: cmd.react, key: mek.key } });
         }
-
         return cmd.function(sock, mek, m, {
           from,
           body,
