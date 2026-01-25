@@ -300,6 +300,37 @@ async function connectToWA() {
     const reply = (text) =>
       test.sendMessage(from, { text }, { quoted: mek });
 
+    // ===================== REPLY HANDLERS (NO PREFIX) =====================
+    // This enables number-replies (e.g., 1/2/3) to work for plugins that use cmd({ filter: ... })
+    // Example: movie/film selection, menu selection, quality selection, etc.
+    if (!isCmd && replyHandlers && replyHandlers.length) {
+      for (const h of replyHandlers) {
+        if (typeof h.filter !== 'function') continue;
+        let ok = false;
+        try {
+          ok = h.filter(body, { sender, from, isGroup, senderNumber });
+        } catch (e) {
+          ok = false;
+        }
+        if (ok) {
+          if (h.react) {
+            test.sendMessage(from, { react: { text: h.react, key: mek.key } });
+          }
+          return h.function(test, mek, m, {
+            from,
+            body,
+            args,
+            q,
+            sender,
+            senderNumber,
+            isGroup,
+            isOwner,
+            reply,
+          });
+        }
+      }
+    }
+
     if (isCmd) {
       const cmd = commands.find(
         (c) => c.pattern === commandName || c.alias?.includes(commandName)
