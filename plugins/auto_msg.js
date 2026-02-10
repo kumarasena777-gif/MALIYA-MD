@@ -18,7 +18,11 @@ const MODEL_CANDIDATES = [
 // ========= SETTINGS =========
 const PREFIXES = ["."];
 const STORE = path.join(process.cwd(), "data", "auto_msg.json");
-const COOLDOWN_MS = 2500;
+
+// 🔒 RATE-LIMIT SAFETY
+const COOLDOWN_MS = 15000;          // 15s per chat
+const BACKOFF_MS_ON_429 = 180000;   // 3 minutes global pause
+const MAX_REPLIES_PER_HOUR = 60;    // global hourly cap
 
 // ========= IDENTITY =========
 const IDENTITY_EN =
@@ -26,15 +30,76 @@ const IDENTITY_EN =
 const IDENTITY_SI =
   "මම MALIYA-MD bot. මම Malindu Nadith විසින් හදපු AI powered advanced bot එකක්.";
 
+// ========= RATE LIMIT FRIENDLY MSG =========
+function rateLimitMsg(lang) {
+  return lang === "si"
+    ? "⏳ දැන් requests වැඩියි. ටිකක් පස්සේ ආයෙ try කරන්න.\n> MALIYA-MD ❤️"
+    : "⏳ Too many requests right now. Please try again in a moment.\n> MALIYA-MD ❤️";
+}
+
+// ========= HELP / ABOUT TEXT =========
+function helpText(lang) {
+  if (lang === "si") {
+    return (
+`🤖 *MALIYA-MD BOT - Help / Guide*
+
+✅ *Prefix:* .
+✅ *Menu:* .menu
+✅ *AI Auto Reply (Private only):*
+   - ON:  .msg on
+   - OFF: .msg off
+   - Status: .msg status
+
+📌 *Bot එක use කරන්නෙ කොහොමද?*
+1) Command එකක් ඕන නම් "." දාලා type කරන්න.
+   උදා: .menu / .ping / .ytmp4 <name> (plugins අනුව වෙනස්)
+2) Normal message එකක් (command නෙමෙයි) දුන්නොත්,
+   AI auto reply ON තියෙද්දි bot එක reply කරනවා.
+
+🧑‍💻 *Bot Details*
+• Name: MALIYA-MD
+• Creator: Malindu Nadith
+• Type: AI powered advanced WhatsApp bot
+
+ℹ️ *Note:* Groups වලට auto reply නෑ. Commands වලට auto reply නෑ.
+
+> MALIYA-MD ❤️`
+    );
+  }
+
+  return (
+`🤖 *MALIYA-MD BOT - Help / Guide*
+
+✅ *Prefix:* .
+✅ *Menu:* .menu
+✅ *AI Auto Reply (Private only):*
+   - ON:  .msg on
+   - OFF: .msg off
+   - Status: .msg status
+
+📌 *How to use?*
+1) For commands, type with "." prefix.
+   Example: .menu / .ping / .ytmp4 <name> (depends on your plugins)
+2) For normal messages (not commands),
+   if auto reply is ON, the bot will reply.
+
+🧑‍💻 *Bot Details*
+• Name: MALIYA-MD
+• Creator: Malindu Nadith
+• Type: AI powered advanced WhatsApp bot
+
+ℹ️ *Note:* No auto replies in groups. No auto replies for commands.
+
+> MALIYA-MD ❤️`
+  );
+}
+
 // ========= STORE (GLOBAL) =========
 function ensureStore() {
   const dir = path.dirname(STORE);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   if (!fs.existsSync(STORE)) {
-    fs.writeFileSync(
-      STORE,
-      JSON.stringify({ global: { enabled: false } }, null, 2)
-    );
+    fs.writeFileSync(STORE, JSON.stringify({ global: { enabled: false } }, null, 2));
   }
 }
 function readStore() {
@@ -71,6 +136,32 @@ function inCooldown(chatId) {
   return false;
 }
 
+// ========= HOURLY CAP =========
+let hourWindowStart = Date.now();
+let repliesThisHour = 0;
+function hitHourlyCap() {
+  const now = Date.now();
+  if (now - hourWindowStart > 3600000) {
+    hourWindowStart = now;
+    repliesThisHour = 0;
+  }
+  if (repliesThisHour >= MAX_REPLIES_PER_HOUR) return true;
+  repliesThisHour++;
+  return false;
+}
+
+// ========= BACKOFF =========
+let backoffUntil = 0;
+function inBackoff() {
+  return Date.now() < backoffUntil;
+}
+function startBackoff() {
+  backoffUntil = Date.now() + BACKOFF_MS_ON_429;
+}
+
+// ========= QUEUE LOCK =========
+let busy = false;
+
 // ========= LANGUAGE DETECT (Sinhala + Singlish) =========
 function detectLang(text) {
   if (!text) return "en";
@@ -79,33 +170,32 @@ function detectLang(text) {
   // Sinhala unicode
   if (/[අ-෴]/.test(text)) return "si";
 
-  // Singlish hints
+  // Singlish hints => Sinhala reply
   const singlishHints = [
     "oya","kawda","mokada","mokak","kohomada","karanna","puluwan",
     "eka","mage","mata","one","nathi","hari","thawa","denna",
     "kiyala","kiyanne","wedak","wada","balanna","ai","ne","da",
-    "thiyenne","thiyanawa","wenne","ganna","haduwe","hadapu"
+    "thiyenne","thiyanawa","wenne","ganna","haduwe","hadapu",
+    "plz","pls","machan","bro","ehema","hariyata"
   ];
 
   if (singlishHints.some(w => t.includes(w))) return "si";
-
   return "en";
 }
 
-// ========= IDENTITY DETECT =========
+// ========= QUESTION DETECTORS =========
 function isIdentityQuestion(text) {
   const t = (text || "").toLowerCase();
+  const siKeys = ["oya kawda", "kawda oya", "oyawa haduwe", "haduwe kawda", "me bot eka kawda"];
+  const enKeys = ["who are you", "who made you", "who created you", "what are you"];
+  return siKeys.some(k => t.includes(k)) || enKeys.some(k => t.includes(k));
+}
 
-  const siKeys = [
-    "oya kawda","kawda oya","oyawa haduwe","haduwe kawda",
-    "oya kawuruda","me bot eka kawda","meeka haduwe"
-  ];
-
-  const enKeys = [
-    "who are you","who made you","who created you",
-    "who built you","what are you"
-  ];
-
+function isHelpQuestion(text) {
+  const t = (text || "").toLowerCase();
+  const siKeys = ["help", "menu", "cmd", "commands", "use karanne", "kohomada use", "bot use", "guide", "info"];
+  const enKeys = ["help", "menu", "commands", "cmd", "how to use", "guide", "info", "about"];
+  // if singlish contains these, it will still match
   return siKeys.some(k => t.includes(k)) || enKeys.some(k => t.includes(k));
 }
 
@@ -113,31 +203,31 @@ function getIdentityReply(lang) {
   return lang === "si" ? IDENTITY_SI : IDENTITY_EN;
 }
 
-// ========= PROMPT =========
-function buildChatPrompt(userText, lang) {
+// ========= PROMPT (NO Google/Gemini mention) =========
+function buildPrompt(userText, lang) {
   if (lang === "si") {
     return `
 ඔබ "MALIYA-MD" bot.
 ඔබ Malindu Nadith විසින් හදපු AI powered advanced bot එකක්.
-Google / WhatsApp / Gemini කියලා කිසිම වෙලාවක කියන්න එපා.
-කෙටි, friendly Sinhalaෙන් උත්තර දෙන්න.
+ඔබ ගැන කතා කරද්දි "MALIYA-MD" සහ "Malindu Nadith" විතරක් භාවිතා කරන්න.
+පිළිතුරු කෙටි, පැහැදිලි, friendly Sinhalaෙන් දෙන්න.
 
 User: ${userText}
 `.trim();
   }
 
   return `
-Your name is "MALIYA-MD" bot.
+You are "MALIYA-MD" bot.
 You are made by Malindu Nadith.
-Never say Google/WhatsApp/Gemini.
-Reply short and friendly.
+When referring to yourself, use only "MALIYA-MD" and "Malindu Nadith".
+Reply short, clear, and friendly in English.
 
 User: ${userText}
 `.trim();
 }
 
 // ========= GEMINI CALL =========
-async function geminiGenerate(prompt) {
+async function generateText(prompt) {
   if (!API_KEY) throw new Error("Missing GEMINI_API_KEY2");
 
   let lastErr = null;
@@ -165,14 +255,14 @@ async function geminiGenerate(prompt) {
     } catch (e) {
       lastErr = e;
       if (e?.response?.status === 404) continue;
-      break;
+      throw e;
     }
   }
 
-  throw lastErr || new Error("Gemini error");
+  throw lastErr || new Error("AI error");
 }
 
-// ========= COMMAND .msg =========
+// ========= COMMAND: .msg =========
 cmd(
   {
     pattern: "msg",
@@ -204,13 +294,13 @@ cmd(
 
 // ========= HOOK =========
 async function onMessage(conn, mek, m, ctx = {}) {
+  let lang = "en";
   try {
     const from = ctx.from || mek?.key?.remoteJid;
     if (!from) return;
 
     // ✅ Private chats only
-    const isGroup = String(from).endsWith("@g.us");
-    if (isGroup) return;
+    if (String(from).endsWith("@g.us")) return;
 
     if (!isGlobalEnabled()) return;
     if (mek?.key?.fromMe) return;
@@ -221,25 +311,50 @@ async function onMessage(conn, mek, m, ctx = {}) {
     // ignore commands
     if (PREFIXES.some(p => body.startsWith(p))) return;
 
-    if (inCooldown(from)) return;
+    lang = detectLang(body);
 
-    const lang = detectLang(body);
+    // ✅ Help/About (NO API call)
+    if (isHelpQuestion(body)) {
+      return await conn.sendMessage(from, { text: helpText(lang) }, { quoted: mek });
+    }
 
-    // identity
+    // ✅ Identity (NO API call)
     if (isIdentityQuestion(body)) {
-      return await conn.sendMessage(from, {
-        text: getIdentityReply(lang),
-      }, { quoted: mek });
+      return await conn.sendMessage(from, { text: getIdentityReply(lang) }, { quoted: mek });
     }
 
-    const prompt = buildChatPrompt(body, lang);
-    const out = await geminiGenerate(prompt);
+    // backoff / queue / caps
+    if (inBackoff()) return;
+    if (busy) return;
+    if (inCooldown(from)) return;
+    if (hitHourlyCap()) return;
 
-    if (out) {
-      await conn.sendMessage(from, { text: out }, { quoted: mek });
-    }
+    busy = true;
+
+    const out = await generateText(buildPrompt(body, lang));
+    if (out) await conn.sendMessage(from, { text: out }, { quoted: mek });
+
   } catch (e) {
-    console.log("AUTO_MSG ERROR:", e?.message || e);
+    const status = e?.response?.status;
+
+    // ✅ 429 -> friendly small msg + backoff (NO Google/Gemini mention)
+    if (status === 429) {
+      startBackoff();
+
+      try {
+        const from = ctx.from || mek?.key?.remoteJid;
+        if (from && !String(from).endsWith("@g.us")) {
+          await conn.sendMessage(from, { text: rateLimitMsg(lang) }, { quoted: mek });
+        }
+      } catch {}
+
+      console.log("AUTO_MSG: rate limit hit (429) - backoff started");
+      return;
+    }
+
+    console.log("AUTO_MSG ERROR:", status || "", e?.message || e);
+  } finally {
+    busy = false;
   }
 }
 
