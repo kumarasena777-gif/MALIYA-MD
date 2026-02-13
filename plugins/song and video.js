@@ -43,12 +43,12 @@ function generateProgressBar(duration) {
 
 /* ================= YOUTUBE VIDEO (MP4) ================= */
 
-/* ================= SIMPLE YOUTUBE VIDEO ================= */
+/* ================= YOUTUBE VIDEO - DIRECT URL ================= */
 
 cmd(
   {
     pattern: "video",
-    alias: ["yt", "ytv"],
+    alias: ["ytv", "ytmp4"],
     react: "🎬",
     category: "download",
     filename: __filename,
@@ -62,23 +62,26 @@ cmd(
       if (!video) return reply("❌ Not found");
 
       const data = await ytmp4(video.url);
-      if (!data?.url) return reply("❌ Download failed");
-
-      await bot.sendMessage(
-        from,
-        {
-          video: { url: data.url },  // direct URL එක send කරන්න
+      
+      if (data?.url) {
+        // Direct URL එක send කරන්න - මේක 100% වැඩ කරයි
+        await bot.sendMessage(from, {
+          video: { url: data.url },
           mimetype: "video/mp4",
           caption: `📌 ${video.title}`,
-        },
-        { quoted: mek }
-      );
+        }, { quoted: mek });
+      } else {
+        reply("❌ Download failed");
+      }
       
     } catch (e) {
       reply("❌ Error: " + e.message);
     }
   }
 );
+
+
+
 cmd(
   {
     pattern: "song",
