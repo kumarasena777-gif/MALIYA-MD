@@ -20,7 +20,7 @@ function getDirectPixeldrainUrl(url) {
 }
 
 async function searchMovies(query) {
-  const searchUrl = `https://sinhalasub.lk/?s=${encodeURIComponent(query)}&post_type=movies`;
+  const searchUrl = `https://cinesubz.lk/?s=${encodeURIComponent(query)}`;
   const browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox"] });
   const page = await browser.newPage();
   await page.goto(searchUrl, { waitUntil: "networkidle2", timeout: 30000 });
