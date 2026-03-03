@@ -18,11 +18,21 @@ const MODEL_CANDIDATES = [
 // ========= SETTINGS =========
 const PREFIXES = ["."];
 const STORE = path.join(process.cwd(), "data", "auto_msg.json");
+const MEMORY_STORE = path.join(process.cwd(), "data", "auto_msg_memory.json");
 
 // 🔒 RATE-LIMIT SAFETY
 const COOLDOWN_MS = 15000;          // 15s per chat
 const BACKOFF_MS_ON_429 = 180000;   // 3 minutes global pause
 const MAX_REPLIES_PER_HOUR = 60;    // global hourly cap
+
+// 🧠 MEMORY SETTINGS
+const MEMORY_MAX_PER_CHAT = 250;     // keep last 250 Q/A per chat
+const MEMORY_TTL_DAYS = 60;          // delete older than 60 days
+const MEMORY_MIN_CHARS = 3;          // ignore super short
+const SIM_THRESHOLD = 0.84;          // 0.84+ => similar enough (tune if needed)
+
+// 🧩 CONTEXT SETTINGS
+const CONTEXT_MAX_TURNS = 6; // last (user+bot)*3
 
 // ========= IDENTITY =========
 const IDENTITY_EN =
@@ -50,19 +60,6 @@ function helpText(lang) {
    - OFF: .msg off
    - Status: .msg status
 
-📌 *Bot එක use කරන්නෙ කොහොමද?*
-1) Command එකක් ඕන නම් "." දාලා type කරන්න.
-   උදා: .menu / .ping / .ytmp4 <name> (plugins අනුව වෙනස්)
-2) Normal message එකක් (command නෙමෙයි) දුන්නොත්,
-   AI auto reply ON තියෙද්දි bot එක reply කරනවා.
-
-🧑‍💻 *Bot Details*
-• Name: MALIYA-MD
-• Creator: Malindu Nadith
-• Type: AI powered advanced WhatsApp bot
-
-ℹ️ *Note:* Groups වලට auto reply නෑ. Commands වලට auto reply නෑ.
-
 > MALIYA-MD ❤️`
     );
   }
@@ -76,19 +73,6 @@ function helpText(lang) {
    - ON:  .msg on
    - OFF: .msg off
    - Status: .msg status
-
-📌 *How to use?*
-1) For commands, type with "." prefix.
-   Example: .menu / .ping / .ytmp4 <name> (depends on your plugins)
-2) For normal messages (not commands),
-   if auto reply is ON, the bot will reply.
-
-🧑‍💻 *Bot Details*
-• Name: MALIYA-MD
-• Creator: Malindu Nadith
-• Type: AI powered advanced WhatsApp bot
-
-ℹ️ *Note:* No auto replies in groups. No auto replies for commands.
 
 > MALIYA-MD ❤️`
   );
@@ -124,6 +108,126 @@ function setGlobalEnabled(val) {
 function isGlobalEnabled() {
   const db = readStore();
   return !!db.global.enabled;
+}
+
+// ========= MEMORY STORE =========
+function ensureMemoryStore() {
+  const dir = path.dirname(MEMORY_STORE);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(MEMORY_STORE)) {
+    fs.writeFileSync(MEMORY_STORE, JSON.stringify({ chats: {}, context: {} }, null, 2));
+  }
+}
+function readMemory() {
+  ensureMemoryStore();
+  try {
+    const db = JSON.parse(fs.readFileSync(MEMORY_STORE, "utf8"));
+    if (!db.chats) db.chats = {};
+    if (!db.context) db.context = {};
+    return db;
+  } catch {
+    return { chats: {}, context: {} };
+  }
+}
+function writeMemory(db) {
+  ensureMemoryStore();
+  fs.writeFileSync(MEMORY_STORE, JSON.stringify(db, null, 2));
+}
+
+function pruneQA(items) {
+  const now = Date.now();
+  const ttlMs = MEMORY_TTL_DAYS * 24 * 60 * 60 * 1000;
+
+  items = (items || []).filter(x => (now - (x.ts || now)) <= ttlMs);
+  if (items.length > MEMORY_MAX_PER_CHAT) {
+    items = items.slice(items.length - MEMORY_MAX_PER_CHAT);
+  }
+  return items;
+}
+
+function saveQA(chatId, q, a) {
+  const db = readMemory();
+  if (!db.chats[chatId]) db.chats[chatId] = [];
+  db.chats[chatId].push({ q, a, ts: Date.now() });
+  db.chats[chatId] = pruneQA(db.chats[chatId]);
+  writeMemory(db);
+}
+
+function getChatMemory(chatId) {
+  const db = readMemory();
+  db.chats[chatId] = pruneQA(db.chats[chatId] || []);
+  writeMemory(db);
+  return db.chats[chatId];
+}
+
+// ---- CONTEXT (last turns) ----
+function saveTurn(chatId, role, text) {
+  const db = readMemory();
+  if (!db.context) db.context = {};
+  if (!db.context[chatId]) db.context[chatId] = [];
+
+  db.context[chatId].push({ role, text: String(text || ""), ts: Date.now() });
+
+  if (db.context[chatId].length > CONTEXT_MAX_TURNS) {
+    db.context[chatId] = db.context[chatId].slice(db.context[chatId].length - CONTEXT_MAX_TURNS);
+  }
+  writeMemory(db);
+}
+
+function getContext(chatId) {
+  const db = readMemory();
+  const ctx = (db.context && db.context[chatId]) ? db.context[chatId] : [];
+  return ctx;
+}
+
+// ========= SIMPLE SIMILARITY (NO DEP) =========
+function normalizeText(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+function tokens(s) {
+  const t = normalizeText(s);
+  if (!t) return [];
+  return t.split(" ").filter(Boolean);
+}
+// Jaccard similarity on tokens (0..1)
+function similarity(a, b) {
+  const A = new Set(tokens(a));
+  const B = new Set(tokens(b));
+  if (!A.size || !B.size) return 0;
+
+  let inter = 0;
+  for (const w of A) if (B.has(w)) inter++;
+
+  const union = A.size + B.size - inter;
+  return union ? inter / union : 0;
+}
+
+function findBestMemoryAnswer(chatId, userText) {
+  const qn = normalizeText(userText);
+  if (!qn || qn.length < MEMORY_MIN_CHARS) return null;
+
+  const items = getChatMemory(chatId);
+  let best = null;
+  let bestScore = 0;
+
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    const sc = similarity(qn, it.q);
+    if (sc > bestScore) {
+      bestScore = sc;
+      best = it;
+      if (bestScore >= 0.98) break;
+    }
+  }
+
+  if (best && bestScore >= SIM_THRESHOLD) {
+    return { answer: best.a, score: bestScore };
+  }
+  return null;
 }
 
 // ========= COOLDOWN =========
@@ -183,6 +287,20 @@ function detectLang(text) {
   return "en";
 }
 
+// ========= FOLLOW-UP DETECT =========
+function isFollowUp(text) {
+  const t = normalizeText(text);
+
+  if (t.length <= 14) return true;
+
+  const keys = [
+    "eka","eeka","ehema","ehama","ow","an","ai","ehenam",
+    "meka","mokakda","kohomada","hari","ok","okay","thawa",
+    "why","how","what about","then","so","explain"
+  ];
+  return keys.some(k => t === k || t.includes(k));
+}
+
 // ========= QUESTION DETECTORS =========
 function isIdentityQuestion(text) {
   const t = (text || "").toLowerCase();
@@ -195,7 +313,6 @@ function isHelpQuestion(text) {
   const t = (text || "").toLowerCase();
   const siKeys = ["help", "menu", "cmd", "commands", "use karanne", "kohomada use", "bot use", "guide", "info"];
   const enKeys = ["help", "menu", "commands", "cmd", "how to use", "guide", "info", "about"];
-  // if singlish contains these, it will still match
   return siKeys.some(k => t.includes(k)) || enKeys.some(k => t.includes(k));
 }
 
@@ -226,7 +343,42 @@ User: ${userText}
 `.trim();
 }
 
-// ========= GEMINI CALL =========
+function buildPromptWithContext(userText, lang, contextTurns) {
+  const history = (contextTurns || [])
+    .map(x => `${x.role === "user" ? "User" : "Bot"}: ${x.text}`)
+    .join("\n");
+
+  if (lang === "si") {
+    return `
+ඔබ "MALIYA-MD" bot.
+ඔබ Malindu Nadith විසින් හදපු AI powered advanced bot එකක්.
+ඔබ ගැන කතා කරද්දි "MALIYA-MD" සහ "Malindu Nadith" විතරක් භාවිතා කරන්න.
+පිළිතුරු කෙටි, පැහැදිලි, friendly Sinhalaෙන් දෙන්න.
+නමුත් හැම වෙලාවේම සහ වැඩිපුර MALIYA-MD කියන එක සහ Malindu Nadith කියන එක භාවිතා නොකරන්න 
+
+මෙන්න පෙර chat context:
+${history || "(no context)"}
+
+දැන් User අහන්නේ:
+${userText}
+`.trim();
+  }
+
+  return `
+You are "MALIYA-MD" bot, made by Malindu Nadith.
+Use only "MALIYA-MD" and "Malindu Nadith" when referring to yourself.
+Reply short, clear, friendly in English.
+But don't use MALIYA-MD and Malindu Nadith all the time and too much.
+
+Previous chat context:
+${history || "(no context)"}
+
+Now the user asks:
+${userText}
+`.trim();
+}
+
+// ========= AI CALL =========
 async function generateText(prompt) {
   if (!API_KEY) throw new Error("Missing GEMINI_API_KEY2");
 
@@ -295,6 +447,7 @@ cmd(
 // ========= HOOK =========
 async function onMessage(conn, mek, m, ctx = {}) {
   let lang = "en";
+
   try {
     const from = ctx.from || mek?.key?.remoteJid;
     if (!from) return;
@@ -313,6 +466,9 @@ async function onMessage(conn, mek, m, ctx = {}) {
 
     lang = detectLang(body);
 
+    // ✅ Save user turn (context)
+    saveTurn(from, "user", body);
+
     // ✅ Help/About (NO API call)
     if (isHelpQuestion(body)) {
       return await conn.sendMessage(from, { text: helpText(lang) }, { quoted: mek });
@@ -329,10 +485,33 @@ async function onMessage(conn, mek, m, ctx = {}) {
     if (inCooldown(from)) return;
     if (hitHourlyCap()) return;
 
+    // ✅ 1) MEMORY CHECK FIRST (NO API)
+    const mem = findBestMemoryAnswer(from, body);
+    if (mem?.answer) {
+      // save bot turn too (context)
+      saveTurn(from, "bot", mem.answer);
+      return await conn.sendMessage(from, { text: mem.answer }, { quoted: mek });
+    }
+
+    // ✅ 2) IF NOT FOUND -> API CALL (context-aware for follow-up)
     busy = true;
 
-    const out = await generateText(buildPrompt(body, lang));
-    if (out) await conn.sendMessage(from, { text: out }, { quoted: mek });
+    const ctxTurns = getContext(from);
+    const prompt = isFollowUp(body)
+      ? buildPromptWithContext(body, lang, ctxTurns)
+      : buildPrompt(body, lang);
+
+    const out = await generateText(prompt);
+
+    if (out) {
+      await conn.sendMessage(from, { text: out }, { quoted: mek });
+
+      // save Q/A so next time no API
+      saveQA(from, normalizeText(body), out);
+
+      // save context
+      saveTurn(from, "bot", out);
+    }
 
   } catch (e) {
     const status = e?.response?.status;
