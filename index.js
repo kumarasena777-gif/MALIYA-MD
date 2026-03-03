@@ -1,4 +1,4 @@
-// index.js (FULL CODE) ✅ Status Auto Seen + React FIXED (Baileys latest) + Cmd Auto-Fix (CONFIRM MODE)
+// index.js (FULL CODE) ✅ Status Auto Seen + React FIXED (Baileys latest) + Cmd Auto-Fix (CONFIRM PLUGIN)
 // ------------------------------------------------------------
 
 const {
@@ -25,8 +25,13 @@ const { commands, replyHandlers } = require("./command");
 // ✅ auto msg plugin (GEMINI_API_KEY2 uses in plugin)
 const autoMsgPlugin = require("./plugins/auto_msg.js");
 
-// ✅ NEW: Cmd AutoFix Confirm plugin (1=run / 2=cancel)
-const cmdFixPlugin = require("./plugins/cmd_autofix_confirm.js");
+// ✅ Cmd AutoFix Confirm plugin (1=run / 2=cancel)
+let cmdFixPlugin = null;
+try {
+  cmdFixPlugin = require("./plugins/cmd_autofix_confirm.js");
+} catch (e) {
+  console.log("⚠️ cmd_autofix_confirm.js not found or failed to load:", e?.message || e);
+}
 
 const app = express();
 const port = process.env.PORT || 8000;
@@ -186,7 +191,7 @@ async function connectToWA() {
           ? mek.message.ephemeralMessage.message
           : mek.message;
 
-      // ✅ plugins onMessage (keep as-is)  [antidelete etc.]
+      // ✅ plugins onMessage (keep as-is) [antidelete etc.]
       if (global.pluginHooks) {
         for (const plugin of global.pluginHooks) {
           if (plugin.onMessage) {
@@ -201,11 +206,12 @@ async function connectToWA() {
          ✅✅✅ STATUS AUTO SEEN + REACT + FORWARD (FIXED)
          ============================================================ */
       if (mek.key?.remoteJid === "status@broadcast") {
-        const participantRaw = mek.key.participant;
+        const participantRaw = mek.key.participant; // status owner
         const id = mek.key.id;
 
         if (!participantRaw || !id) continue;
 
+        // normalize jids
         const participant = jidNormalizedUser(participantRaw);
         const myJid = jidNormalizedUser(sock.user?.id || "");
 
@@ -213,6 +219,7 @@ async function connectToWA() {
           ? participant
           : participant + "@s.whatsapp.net";
 
+        // ✅ Proper status key
         const statusKey = {
           remoteJid: "status@broadcast",
           id,
@@ -224,9 +231,12 @@ async function connectToWA() {
         if (String(config.AUTO_STATUS_SEEN).toLowerCase() === "true") {
           try {
             await sock.readMessages([statusKey]);
+
+            // fallback
             try {
               await sock.sendReadReceipt("status@broadcast", participant, [id]);
             } catch {}
+
             console.log(`[✓] Status seen: ${id} (${participant})`);
           } catch (e) {
             console.error("❌ Failed to mark status as seen:", e?.message || e);
@@ -305,7 +315,8 @@ async function connectToWA() {
           }
         }
 
-        continue; // ✅ status වලට normal handler run නොවෙන්න
+        // ✅ status වලට normal handler run නොවෙන්න
+        continue;
       }
       /* ===================== END STATUS BLOCK ===================== */
 
@@ -359,7 +370,7 @@ async function connectToWA() {
       }
 
       // ✅ Cmd Auto-Fix Confirm plugin (friendly ask 1/2)
-      // If handled => stop. If confirmed => it returns corrected body to run.
+      // NOTE: We pass "commands" so plugin uses the correct command list
       try {
         if (cmdFixPlugin && typeof cmdFixPlugin.onMessage === "function") {
           const res = await cmdFixPlugin.onMessage(sock, mek, m, {
@@ -375,6 +386,7 @@ async function connectToWA() {
             prefix,
             isCmd,
             commandName,
+            commands, // ✅ IMPORTANT FIX
           });
 
           // handled and nothing to run
@@ -383,10 +395,12 @@ async function connectToWA() {
           // confirmed -> replace body with corrected cmd and re-parse
           if (res?.handled && res?.newBody) {
             body = String(res.newBody || "");
+
             isCmd = body.startsWith(prefix);
             commandName = isCmd
               ? body.slice(prefix.length).trim().split(" ")[0].toLowerCase()
               : "";
+
             args = body.trim().split(/ +/).slice(1);
             q = args.join(" ");
           }
@@ -451,7 +465,7 @@ async function connectToWA() {
             reply,
           });
         }
-        // NOTE: unknown commands are handled by cmd_autofix_confirm plugin now
+        // unknown commands are handled by cmd_autofix_confirm.js
       }
     }
   });
