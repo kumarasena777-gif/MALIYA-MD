@@ -54,7 +54,9 @@
     "@distube/ytdl-core": "latest",
     "youtube-dl-exec": "latest",
     "@ffmpeg-installer/ffmpeg": "latest",
-    "@ffprobe-installer/ffprobe": "latest"
+    "@ffprobe-installer/ffprobe": "latest",
+    "sharp": "latest",
+    "tesseract.js": "latest"
     
   }
 }
