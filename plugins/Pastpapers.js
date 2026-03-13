@@ -60,7 +60,7 @@ async function extractPdfFromPage(pageUrl) {
   }
 }
 
-// ✅ Primary Search: pastpapers.wiki internal search
+// ✅ Primary Search: pastpapers.wiki internal search.
 async function searchPastpapersWiki(query) {
   const searchUrl = `https://pastpapers.wiki/?s=${encodeURIComponent(query)}`;
   const res = await httpGet(searchUrl);
