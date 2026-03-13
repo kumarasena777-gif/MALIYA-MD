@@ -23,7 +23,7 @@ const { File } = require("megajs");
 const { commands, replyHandlers } = require("./command");
 
 // ✅ auto msg plugin (GEMINI_API_KEY2 uses in plugin)
-const autoMsgPlugin = require("./plugins/auto_msg.js");
+
 
 // ✅ Cmd AutoFix Confirm plugin (1=run / 2=cancel)
 let cmdFixPlugin = null;
