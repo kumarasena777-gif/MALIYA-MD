@@ -34,6 +34,19 @@ function formatViews(num) {
   return Number(num).toLocaleString();
 }
 
+function formatSeconds(seconds) {
+  if (!seconds || isNaN(seconds)) return "Unknown";
+  seconds = Number(seconds);
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 function generateProgressBar(duration = "0:00") {
   return `*00:00* ──────────◉ *${duration}*`;
 }
@@ -49,32 +62,88 @@ function sanitizeFileName(name = "youtube_video") {
 
 function getQualityFromChoice(choice) {
   switch (String(choice).trim()) {
-    case "1":
-      return "360";
-    case "2":
-      return "480";
-    case "3":
-      return "720";
-    case "4":
-      return "1080";
-    default:
-      return null;
+    case "1": return "360";
+    case "2": return "480";
+    case "3": return "720";
+    case "4": return "1080";
+    default: return null;
   }
 }
 
 function getQualityLabel(choice) {
   switch (String(choice).trim()) {
-    case "1":
-      return "360p";
-    case "2":
-      return "480p";
-    case "3":
-      return "720p HD";
-    case "4":
-      return "1080p FHD";
-    default:
-      return "Unknown";
+    case "1": return "360p";
+    case "2": return "480p";
+    case "3": return "720p HD";
+    case "4": return "1080p FHD";
+    default: return "Unknown";
   }
+}
+
+function buildVideoDetails(video) {
+  const title = video.title || "Unknown Title";
+  const channel = video.author?.name || "Unknown Channel";
+  const duration = video.timestamp || formatSeconds(video.seconds) || "0:00";
+  const views = formatViews(video.views);
+  const uploaded = video.ago || "Unknown";
+  const videoId = video.videoId || "Unknown";
+  const url = video.url || "Unavailable";
+  const live = video.live ? "Yes" : "No";
+
+  return `🎥 *${title}*
+
+╭━━━〔 📄 VIDEO DETAILS 〕━━━╮
+👤 *Channel:* ${channel}
+🆔 *Video ID:* ${videoId}
+⏱️ *Duration:* ${duration}
+👀 *Views:* ${views}
+📅 *Uploaded:* ${uploaded}
+📡 *Live:* ${live}
+🔗 *Link:* ${url}
+╰━━━━━━━━━━━━━━━━━━━━━━━╯
+
+${generateProgressBar(duration)}`;
+}
+
+function buildQualityMenu(video) {
+  const title = video.title || "Unknown Title";
+  const channel = video.author?.name || "Unknown Channel";
+  const duration = video.timestamp || formatSeconds(video.seconds) || "0:00";
+  const views = formatViews(video.views);
+  const uploaded = video.ago || "Unknown";
+  const videoId = video.videoId || "Unknown";
+  const live = video.live ? "Yes" : "No";
+
+  return `╭━━━〔 🎬 VIDEO INFO 〕━━━╮
+🎥 *Title:* ${title}
+👤 *Channel:* ${channel}
+🆔 *Video ID:* ${videoId}
+⏱️ *Duration:* ${duration}
+👀 *Views:* ${views}
+📅 *Uploaded:* ${uploaded}
+📡 *Live:* ${live}
+╰━━━━━━━━━━━━━━━━━━━━━━━╯
+
+╭━━━〔 🎞️ VIDEO QUALITY 〕━━━╮
+  1️⃣  •  \`360p\`
+  2️⃣  •  \`480p\`
+  3️⃣  •  \`720p HD\`
+  4️⃣  •  \`1080p FHD\`
+╰━━━━━━━━━━━━━━━━━━━━━━━╯
+
+✍️ *Reply with:* 1, 2, 3 or 4`;
+}
+
+function buildFinalCaption(video, qualityLabel, sizeMB) {
+  return `╭━━━〔 ✅ DOWNLOAD COMPLETE 〕━━━╮
+🎥 *Title:* ${video.title || "Unknown Title"}
+👤 *Channel:* ${video.author?.name || "Unknown Channel"}
+🎞️ *Quality:* ${qualityLabel}
+⏱️ *Duration:* ${video.timestamp || formatSeconds(video.seconds) || "0:00"}
+👀 *Views:* ${formatViews(video.views)}
+📅 *Uploaded:* ${video.ago || "Unknown"}
+📦 *Size:* ${sizeMB.toFixed(2)} MB
+╰━━━━━━━━━━━━━━━━━━━━━━━╯`;
 }
 
 async function getYoutube(query) {
@@ -100,9 +169,7 @@ async function downloadFile(url, outPath) {
     method: "GET",
     responseType: "stream",
     timeout: 180000,
-    headers: {
-      "User-Agent": "Mozilla/5.0",
-    },
+    headers: { "User-Agent": "Mozilla/5.0" },
     maxRedirects: 5,
   });
 
@@ -139,8 +206,8 @@ async function reencodeForWhatsApp(inputPath, outputPath) {
 
 cmd(
   {
-    pattern: "ytmp4",
-    alias: ["ytv", "video"],
+    pattern: "video",
+    alias: ["ytmp4", "ytv", "vdl"],
     react: "🎥",
     desc: "Download YouTube video with quality selection",
     category: "download",
@@ -148,39 +215,20 @@ cmd(
   },
   async (sock, mek, m, { from, q, sender, reply }) => {
     try {
-      if (!q) return reply("🎬 Please send a YouTube video name or link.");
+      if (!q) return reply("🎬 Please provide a YouTube link or video name.");
 
-      await reply("🔎 Searching YouTube...");
+      await reply("🔍 Searching Video...");
 
       const video = await getYoutube(q);
       if (!video) return reply("❌ No results found.");
 
-      const title = video.title || "Unknown Title";
-      const channel = video.author?.name || "Unknown Channel";
-      const duration = video.timestamp || "Unknown";
-      const views = formatViews(video.views);
-      const uploaded = video.ago || "Unknown";
-      const videoUrl = video.url || "Unknown";
       const thumbnail = video.thumbnail;
-
-      const detailsCaption = `╭*MALIYA-MD YOUTUBE DOWNLOADER* ━⬣
-┃ 🎬 *Title* : ${title}
-┃ 👤 *Channel* : ${channel}
-┃ ⏱ *Duration* : ${duration}
-┃ 👀 *Views* : ${views}
-┃ 📅 *Uploaded* : ${uploaded}
-┃ 🔗 *Link* : ${videoUrl}
-╰━━━━━━━━━━━━━━⬣
-
-${generateProgressBar(duration)}
-
-> *Fast • Stable • Phone Supported Video Download*`;
 
       await sock.sendMessage(
         from,
         {
           image: { url: thumbnail },
-          caption: detailsCaption,
+          caption: buildVideoDetails(video),
         },
         { quoted: mek }
       );
@@ -188,16 +236,7 @@ ${generateProgressBar(duration)}
       await sock.sendMessage(
         from,
         {
-          text: `╭━〔 *SELECT VIDEO QUALITY* 〕━⬣
-┃ *1* ┃ 360p
-┃ *2* ┃ 480p
-┃ *3* ┃ 720p HD
-┃ *4* ┃ 1080p FHD
-┃ > MALIYA-MD 🎥🎥
-╰━━━━━━━━━━━━━━━⬣
-
-📥 *Reply with a number only*
-> Example : 1 or 2 or 3 or 4`,
+          text: buildQualityMenu(video),
         },
         { quoted: mek }
       );
@@ -248,9 +287,7 @@ replyHandlers.push({
       fixedFile = makeTempFile(".mp4");
 
       await downloadFile(data.url, rawFile);
-
       await reply("🛠 Converting video for phone support...");
-
       await reencodeForWhatsApp(rawFile, fixedFile);
 
       const sizeMB = getFileSizeMB(fixedFile);
@@ -263,16 +300,7 @@ replyHandlers.push({
             document: fs.readFileSync(fixedFile),
             mimetype: "video/mp4",
             fileName: `${cleanTitle}_${quality}p.mp4`,
-            caption: `╭━━━〔 *VIDEO READY* 〕━━━⬣
-┃ 🎬 *Title* : ${pending.video.title}
-┃ 🎞 *Quality* : ${qualityLabel}
-┃ 📦 *Size* : ${sizeMB.toFixed(2)} MB
-┃ 📄 *Mode* : Document
-┃ > 🍀ENJOY YOUR VIDEO🍀
-╰━━━━━━━━━━━━━━━━━━⬣
-
-> File size is high, so it was sent as a document.
-*MALIYA-MD ❤️*`,
+            caption: buildFinalCaption(pending.video, qualityLabel, sizeMB),
           },
           { quoted: mek }
         );
@@ -283,15 +311,7 @@ replyHandlers.push({
             video: fs.readFileSync(fixedFile),
             mimetype: "video/mp4",
             fileName: `${cleanTitle}_${quality}p.mp4`,
-            caption: `╭━━━〔 *VIDEO READY* 〕━━━⬣
-┃ 🎬 *Title* : ${pending.video.title}
-┃ 🎞 *Quality* : ${qualityLabel}
-┃ 📦 *Size* : ${sizeMB.toFixed(2)} MB
-┃ 📱 *Mode* : Playable Video
-┃ > 🍀ENJOY YOUR VIDEO🍀
-╰━━━━━━━━━━━━━━━━━━⬣
-
-*MALIYA-MD ❤️*`,
+            caption: buildFinalCaption(pending.video, qualityLabel, sizeMB),
             gifPlayback: false,
           },
           { quoted: mek }
