@@ -100,6 +100,43 @@ function sanitizeChatId(chatId) {
   return String(chatId || "unknown").replace(/[^\w.-]+/g, "_").slice(0, 120);
 }
 
+function cleanAiText(text) {
+  return String(text || "")
+    .replace(/\r/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function splitMessage(text, chunkSize = 3500) {
+  const clean = cleanAiText(text);
+  if (!clean) return [];
+
+  if (clean.length <= chunkSize) return [clean];
+
+  const chunks = [];
+  let remaining = clean;
+
+  while (remaining.length > chunkSize) {
+    let cut = remaining.lastIndexOf("\n", chunkSize);
+    if (cut < 1000) cut = remaining.lastIndexOf(". ", chunkSize);
+    if (cut < 1000) cut = remaining.lastIndexOf(" ", chunkSize);
+    if (cut < 1000) cut = chunkSize;
+
+    chunks.push(remaining.slice(0, cut).trim());
+    remaining = remaining.slice(cut).trim();
+  }
+
+  if (remaining) chunks.push(remaining);
+  return chunks.filter(Boolean);
+}
+
+async function sendLongMessage(conn, jid, text, quoted) {
+  const parts = splitMessage(text, 3500);
+  for (const part of parts) {
+    await conn.sendMessage(jid, { text: part }, { quoted });
+  }
+}
+
 function ensureBaseFiles() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(LOGS_DIR)) fs.mkdirSync(LOGS_DIR, { recursive: true });
@@ -782,7 +819,9 @@ function buildPrompt(userText, lang, chatId) {
 ඔබ "MALIYA-MD" bot.
 ඔබ Malindu Nadith විසින් හදපු AI powered advanced bot එකක්.
 ඔබ ගැන කතා කරද්දි "MALIYA-MD" සහ "Malindu Nadith" විතරක් භාවිතා කරන්න.
-User ගේ style එකට ගැලපෙන විදිහට short, natural, friendly Sinhala / Singlish mix reply දෙන්න.
+User ගේ style එකට ගැලපෙන විදිහට natural, friendly Sinhala / Singlish mix reply දෙන්න.
+User short අහලා තියෙනවා නම් short reply දෙන්න.
+User detail ඉල්ලුවොත් complete reply දෙන්න.
 Unnecessary details දෙන්න එපා.
 Same phrases නැවත නැවත use කරන්න එපා.
 User style mimic කරන්න, හැබැයි over කරන්න එපා.
@@ -805,7 +844,9 @@ User: ${userText}
 You are "MALIYA-MD" bot.
 You are made by Malindu Nadith.
 Use only "MALIYA-MD" and "Malindu Nadith" when referring to yourself.
-Reply short, clear, friendly, and natural.
+Reply naturally, clearly, and friendly.
+If the user asks briefly, keep it short.
+If the user asks for details, give a complete answer.
 Match the user's style and tone without overdoing it.
 Avoid repeating the bot name.
 Avoid unnecessary details.
@@ -837,7 +878,9 @@ function buildPromptWithContext(userText, lang, chatId, contextTurns) {
 ඔබ Malindu Nadith විසින් හදපු AI powered advanced bot එකක්.
 ඔබ ගැන කතා කරද්දි "MALIYA-MD" සහ "Malindu Nadith" විතරක් භාවිතා කරන්න.
 User කලින් කතා කරපු context එක බලලා reply කරන්න.
-Follow-up එකට context එකට ගැලපෙන short, clear, natural Sinhala / Singlish reply දෙන්න.
+Follow-up එකට context එකට ගැලපෙන natural, clear Sinhala / Singlish reply දෙන්න.
+User short අහලා තියෙනවා නම් short reply දෙන්න.
+User detail අහලා තියෙනවා නම් complete reply දෙන්න.
 User style mimic කරන්න, හැබැයි unnatural වෙන්න එපා.
 නිතරම bot name repeat කරන්න එපා.
 
@@ -866,7 +909,9 @@ ${userText}
 You are "MALIYA-MD" bot, made by Malindu Nadith.
 Use only "MALIYA-MD" and "Malindu Nadith" when referring to yourself.
 Use previous context properly for follow-up messages.
-Reply short, clear, natural, and friendly.
+Reply naturally, clearly, and friendly.
+If the user asks briefly, keep it short.
+If the user asks for details, give a complete answer.
 Match the user's style without overdoing it.
 Avoid unnecessary details and repeated phrases.
 
@@ -920,7 +965,7 @@ async function generateWithGemini(prompt) {
           generationConfig: {
             temperature: 0.75,
             topP: 0.95,
-            maxOutputTokens: 300,
+            maxOutputTokens: 900,
           },
         },
         {
@@ -991,7 +1036,7 @@ async function generateWithDeepSeek(prompt) {
           ],
           temperature: 0.75,
           top_p: 0.95,
-          max_tokens: 300,
+          max_tokens: 900,
           stream: false,
         },
         {
@@ -1178,7 +1223,7 @@ async function onMessage(conn, mek, m, ctx = {}) {
 
     if (isHelpQuestion(body)) {
       const txt = helpText(lang);
-      await conn.sendMessage(from, { text: txt }, { quoted: mek });
+      await sendLongMessage(conn, from, txt, mek);
 
       saveTurn(from, "bot", txt);
       appendChatLog(from, { role: "bot", text: txt, ts: Date.now() });
@@ -1190,7 +1235,7 @@ async function onMessage(conn, mek, m, ctx = {}) {
 
     if (isIdentityQuestion(body)) {
       const txt = getIdentityReply(lang);
-      await conn.sendMessage(from, { text: txt }, { quoted: mek });
+      await sendLongMessage(conn, from, txt, mek);
 
       saveTurn(from, "bot", txt);
       appendChatLog(from, { role: "bot", text: txt, ts: Date.now() });
@@ -1207,7 +1252,7 @@ async function onMessage(conn, mek, m, ctx = {}) {
 
     const cacheHit = findCacheAnswer(from, body, lang);
     if (cacheHit?.answer) {
-      await conn.sendMessage(from, { text: cacheHit.answer }, { quoted: mek });
+      await sendLongMessage(conn, from, cacheHit.answer, mek);
 
       saveTurn(from, "bot", cacheHit.answer);
       appendChatLog(from, {
@@ -1227,7 +1272,7 @@ async function onMessage(conn, mek, m, ctx = {}) {
     if (mem?.answer) {
       const reused = mem.answer;
 
-      await conn.sendMessage(from, { text: reused }, { quoted: mek });
+      await sendLongMessage(conn, from, reused, mek);
 
       saveTurn(from, "bot", reused);
       appendChatLog(from, {
@@ -1253,10 +1298,10 @@ async function onMessage(conn, mek, m, ctx = {}) {
       : buildPrompt(body, lang, from);
 
     const result = await generateText(prompt);
-    const out = result?.text?.trim();
+    const out = cleanAiText(result?.text || "");
 
     if (out) {
-      await conn.sendMessage(from, { text: out }, { quoted: mek });
+      await sendLongMessage(conn, from, out, mek);
 
       saveQA(from, body, out);
       saveCache(from, body, out, lang);
@@ -1283,7 +1328,7 @@ async function onMessage(conn, mek, m, ctx = {}) {
       startBackoff();
       try {
         if (from && !String(from).endsWith("@g.us")) {
-          await conn.sendMessage(from, { text: rateLimitMsg(lang) }, { quoted: mek });
+          await sendLongMessage(conn, from, rateLimitMsg(lang), mek);
         }
       } catch {}
       console.log("AUTO_MSG: rate limit hit (429) - backoff started");
@@ -1302,7 +1347,7 @@ async function onMessage(conn, mek, m, ctx = {}) {
 
     try {
       if (from && !String(from).endsWith("@g.us")) {
-        await conn.sendMessage(from, { text: serviceUnavailableMsg(lang) }, { quoted: mek });
+        await sendLongMessage(conn, from, serviceUnavailableMsg(lang), mek);
       }
     } catch {}
   } finally {
