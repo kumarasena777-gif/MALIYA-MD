@@ -146,7 +146,7 @@ cmd(
         );
       }
 
-      await reply("Searching papers...");
+      await reply("Searching papers....");
 
       // ✅ Use pastpapers.wiki internal search (works even if DDG blocks)
       const results = await searchPastpapersWiki(q);
