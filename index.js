@@ -1,4 +1,4 @@
-// index.js (FULL CODE) ✅ Status Auto Seen + React FIXED + Cmd Auto-Fix + PDF Scanner Auto
+// index.js (FULL CODE) ✅ Status Auto Seen + React FIXED (Baileys latest) + Cmd Auto-Fix (CONFIRM PLUGIN)
 // ------------------------------------------------------------
 
 const {
@@ -30,7 +30,7 @@ let pdfScannerPlugin = null;
 try {
   pdfScannerPlugin = require("./plugins/PDF scanner.js");
 } catch (e) {
-  console.log("⚠️ pdf_scanner.js not found or failed to load:", e?.message || e);
+  console.log("⚠️ PDF scanner.js not found or failed to load:", e?.message || e);
 }
 
 // ✅ Cmd AutoFix Confirm plugin
@@ -185,7 +185,6 @@ async function connectToWA() {
       try {
         fs.readdirSync("./plugins/").forEach((plugin) => {
           if (plugin === "auto_msg.js") return; // prevent duplicate load
-          if (plugin === "pdf_scanner.js") return; // already loaded above
           if (plugin.endsWith(".js")) {
             require(`./plugins/${plugin}`);
           }
@@ -263,9 +262,8 @@ async function connectToWA() {
         if (String(config.AUTO_STATUS_REACT).toLowerCase() === "true") {
           try {
             const emojis = [
-              "❤️", "💸", "😇", "🍂", "💥", "💯", "🔥", "💫", "💎", "💗",
-              "🤍", "🖤", "👀", "🙌", "🙆", "🚩", "🥰", "💐", "😎", "✅",
-              "🫀", "😁", "😄", "🌸", "🕊️", "🌷", "⛅", "🌟", "🗿", "💜", "🌝"
+              "❤️","💸","😇","🍂","💥","💯","🔥","💫","💎","💗","🤍","🖤","👀","🙌","🙆","🚩",
+              "🥰","💐","😎","✅","🫀","😁","😄","🌸","🕊️","🌷","⛅","🌟","🗿","💜","🌝"
             ];
             const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
 
@@ -311,9 +309,7 @@ async function connectToWA() {
             );
 
             let buffer = Buffer.from([]);
-            for await (const chunk of stream) {
-              buffer = Buffer.concat([buffer, chunk]);
-            }
+            for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
 
             const mimetype =
               mediaMsg.mimetype || (msgType === "imageMessage" ? "image/jpeg" : "video/mp4");
@@ -539,8 +535,7 @@ async function connectToWA() {
               body: pollName,
               isGroup: key.remoteJid.endsWith("@g.us"),
               sender: key.participant || key.remoteJid,
-              reply: (text) =>
-                sock.sendMessage(key.remoteJid, { text }, { quoted: { key } }),
+              reply: (text) => sock.sendMessage(key.remoteJid, { text }, { quoted: { key } })
             });
           }
         } catch (e) {
