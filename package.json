@@ -56,7 +56,8 @@
     "@ffmpeg-installer/ffmpeg": "latest",
     "@ffprobe-installer/ffprobe": "latest",
     "sharp": "latest",
-    "tesseract.js": "latest"
+    "tesseract.js": "latest",
+    "pdf-parse": "latest"
     
   }
 }
