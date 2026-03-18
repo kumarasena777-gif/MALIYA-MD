@@ -194,31 +194,9 @@ function makeCategoryRows(map, categories) {
     return {
       title: `${emo} ${cat} MENU`,
       description: `${map[cat].length} commands available`,
-      id: `menu_view:${cat}`, // ✅ direct view
+      id: `menu_view:${cat}`,
     };
   });
-}
-
-function walkStringsDeep(value, out = []) {
-  if (value == null) return out;
-
-  if (typeof value === "string") {
-    out.push(value);
-    return out;
-  }
-
-  if (Array.isArray(value)) {
-    for (const item of value) walkStringsDeep(item, out);
-    return out;
-  }
-
-  if (typeof value === "object") {
-    for (const k of Object.keys(value)) {
-      walkStringsDeep(value[k], out);
-    }
-  }
-
-  return out;
 }
 
 function tryParseJsonString(s) {
@@ -229,64 +207,84 @@ function tryParseJsonString(s) {
   }
 }
 
-function extractSelectionText(body, mek, m) {
-  const collected = [];
+function extractTexts(body, mek, m) {
+  const texts = [];
 
-  if (body) collected.push(String(body));
-  if (m?.body) collected.push(String(m.body));
-  if (m?.text) collected.push(String(m.text));
-  if (m?.message) walkStringsDeep(m.message, collected);
-  if (mek?.message) walkStringsDeep(mek.message, collected);
+  const direct = [
+    body,
+    m?.body,
+    m?.text,
+    m?.message?.conversation,
+    m?.message?.extendedTextMessage?.text,
+    m?.message?.buttonsResponseMessage?.selectedButtonId,
+    m?.message?.buttonsResponseMessage?.selectedDisplayText,
+    m?.message?.templateButtonReplyMessage?.selectedId,
+    m?.message?.templateButtonReplyMessage?.selectedDisplayText,
+    m?.message?.listResponseMessage?.title,
+    m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    m?.message?.interactiveResponseMessage?.body?.text,
+    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
+    mek?.message?.conversation,
+    mek?.message?.extendedTextMessage?.text,
+    mek?.message?.buttonsResponseMessage?.selectedButtonId,
+    mek?.message?.buttonsResponseMessage?.selectedDisplayText,
+    mek?.message?.templateButtonReplyMessage?.selectedId,
+    mek?.message?.templateButtonReplyMessage?.selectedDisplayText,
+    mek?.message?.listResponseMessage?.title,
+    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
+    mek?.message?.interactiveResponseMessage?.body?.text,
+    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
+  ];
 
-  const nativeParams =
-    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson ||
-    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-
-  if (nativeParams) {
-    collected.push(String(nativeParams));
-    const parsed = tryParseJsonString(nativeParams);
-    if (parsed) walkStringsDeep(parsed, collected);
+  for (const item of direct) {
+    if (item) texts.push(String(item).trim());
   }
 
-  const uniq = [...new Set(collected.map((x) => String(x).trim()).filter(Boolean))];
-  return uniq;
+  const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+
+  for (const raw of [p1, p2]) {
+    if (!raw) continue;
+    const parsed = tryParseJsonString(raw);
+    if (!parsed) continue;
+
+    const vals = [
+      parsed.id,
+      parsed.selectedId,
+      parsed.selectedRowId,
+      parsed.title,
+      parsed.display_text,
+      parsed.text,
+      parsed.name,
+    ];
+
+    for (const v of vals) {
+      if (v) texts.push(String(v).trim());
+    }
+  }
+
+  return [...new Set(texts.filter(Boolean))];
 }
 
-function resolveMenuActionFromTexts(texts, state) {
+function resolveMenuAction(texts, state) {
   const normalized = texts.map((t) => normalizeText(t)).filter(Boolean);
 
   for (const text of normalized) {
     if (text.startsWith("MENU_VIEW:")) {
-      return { type: "view", cat: text.replace("MENU_VIEW:", "").trim(), raw: text };
-    }
-
-    if (text.startsWith("MENU_BACK:MAIN")) {
-      return { type: "back", raw: text };
-    }
-
-    if (text.startsWith("MENU_CLOSE:NOW")) {
-      return { type: "close", raw: text };
+      return { type: "view", cat: text.replace("MENU_VIEW:", "").trim() };
     }
 
     for (const cat of state.categories || []) {
       const catText = normalizeText(cat);
 
       if (
-        text.includes(`${catText} MENU`) ||
         text === `${catText} MENU` ||
-        text.includes(`${catText} COMMANDS`) ||
-        text === `${catText} COMMANDS`
+        text.includes(`${catText} MENU`) ||
+        text === `${catText} COMMANDS` ||
+        text.includes(`${catText} COMMANDS`)
       ) {
-        return { type: "view", cat, raw: text };
+        return { type: "view", cat };
       }
-    }
-
-    if (text.includes("BACK TO MAIN MENU")) {
-      return { type: "back", raw: text };
-    }
-
-    if (text.includes("CLOSE MENU")) {
-      return { type: "close", raw: text };
     }
   }
 
@@ -295,7 +293,7 @@ function resolveMenuActionFromTexts(texts, state) {
 
 function isDuplicateAction(state, action) {
   const now = Date.now();
-  const sig = `${action.type}:${action.cat || ""}:${action.raw || ""}`;
+  const sig = `${action.type}:${action.cat || ""}`;
 
   if (state.lastActionSig === sig && now - (state.lastActionAt || 0) < 2500) {
     return true;
@@ -378,7 +376,6 @@ cmd(
       const k = keyFor(sender, from);
 
       pendingMenu[k] = {
-        step: "main",
         map,
         categories,
         userName,
@@ -389,18 +386,18 @@ cmd(
 
       await sendMainMenu(sock, from, mek, pendingMenu[k], userName);
     } catch (e) {
-      console.log("MENU ERROR:", e);
+      console.log("MENU ERROR:", e?.message || e);
       reply("❌ Menu eka send karanna බැරි වුණා.");
     }
   }
 );
 
-/* ================= HANDLE MENU ACTIONS ================= */
+/* ================= REPLY HANDLER ================= */
 cmd(
   {
     filter: (_text, { sender, from }) => {
       const k = keyFor(sender, from);
-      return !!pendingMenu[k]; // ✅ always listen while menu session active
+      return !!pendingMenu[k];
     },
     dontAddCommandList: true,
     filename: __filename,
@@ -411,44 +408,29 @@ cmd(
       const state = pendingMenu[k];
       if (!state) return;
 
-      const texts = extractSelectionText(body, mek, m);
-      const action = resolveMenuActionFromTexts(texts, state);
-
-      if (!action) return; // unrelated msg නම් ignore
+      const texts = extractTexts(body, mek, m);
+      const action = resolveMenuAction(texts, state);
+      if (!action) return;
 
       if (isDuplicateAction(state, action)) return;
 
       const userName = state.userName || getUserName(pushname, m, mek, sender);
-      state.userName = userName;
+      const cat = action.cat;
+      const list = state.map[cat] || [];
+
+      if (!list.length) {
+        return reply("❌ No commands found in this category.");
+      }
+
       state.timestamp = Date.now();
 
-      if (action.type === "close") {
-        delete pendingMenu[k];
-        await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
-        return reply("✅ Menu closed.");
-      }
+      await sock.sendMessage(from, {
+        react: { text: getCategoryEmoji(cat), key: mek.key },
+      });
 
-      if (action.type === "back") {
-        await sock.sendMessage(from, { react: { text: "↩️", key: mek.key } });
-        return sendMainMenu(sock, from, mek, state, userName);
-      }
-
-      if (action.type === "view") {
-        const cat = action.cat;
-        const list = state.map[cat] || [];
-
-        if (!list.length) {
-          return reply("❌ No commands found in this category.");
-        }
-
-        await sock.sendMessage(from, {
-          react: { text: getCategoryEmoji(cat), key: mek.key },
-        });
-
-        return sendCommandsList(sock, from, mek, cat, list, userName);
-      }
+      return sendCommandsList(sock, from, mek, cat, list, userName);
     } catch (e) {
-      console.log("MENU ACTION ERROR:", e);
+      console.log("MENU ACTION ERROR:", e?.message || e);
     }
   }
 );
