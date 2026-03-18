@@ -382,7 +382,7 @@ async function handleVideoQualityDownload(sock, mek, from, sender, reply, choice
   const quality = getQualityFromChoice(choiceRaw);
   const qualityLabel = getQualityLabel(choiceRaw);
 
-  if (!quality) return reply("❌ Please select a valid quality.");
+  if (!quality) return;
 
   if (pending.isProcessing) return;
   if (isDuplicateQualityAction(pending, quality)) return;
@@ -493,12 +493,9 @@ cmd(
 );
 
 replyHandlers.push({
-  filter: (body, { sender, from }) => {
+  filter: (_body, { sender, from }) => {
     const key = makePendingKey(sender, from);
-    if (!pendingVideoQuality[key]) return false;
-
-    const quality = extractQualityFromTexts([body]);
-    return !!quality || /^[1-4]$/.test(String(body || "").trim());
+    return !!pendingVideoQuality[key];
   },
 
   function: async (sock, mek, m, { from, body, sender, reply }) => {
@@ -514,7 +511,7 @@ replyHandlers.push({
       quality = getQualityFromChoice(body);
     }
 
-    if (!quality) return;
+    if (!quality) return; // unrelated message නම් ignore
 
     return handleVideoQualityDownload(sock, mek, from, sender, reply, quality);
   },
