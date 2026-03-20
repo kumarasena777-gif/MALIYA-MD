@@ -1,18 +1,124 @@
-const { cmd, replyHandlers } = require("../command");
-const { ytmp3, tiktok } = require("sadaslk-dlcore");
+const { cmd } = require("../command");
+const { ytmp3, ytmp4 } = require("sadaslk-dlcore");
+const { sendButtons } = require("gifted-btns");
 const yts = require("yt-search");
 const fs = require("fs");
 const axios = require("axios");
 const path = require("path");
-const crypto = require("crypto");
-const { sendInteractiveMessage } = require("gifted-btns");
+const ffmpeg = require("fluent-ffmpeg");
+const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
+const ffprobePath = require("@ffprobe-installer/ffprobe").path;
 
+ffmpeg.setFfmpegPath(ffmpegPath);
+ffmpeg.setFfprobePath(ffprobePath);
+
+/* ================= STORAGE ================= */
+
+const STORE_PATH = path.join(__dirname, "csong_targets.json");
 const TEMP_DIR = path.join(__dirname, "../temp");
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
 
-const pendingSongType = Object.create(null);
+function readStore() {
+  try {
+    if (!fs.existsSync(STORE_PATH)) return { groups: [] };
+    return JSON.parse(fs.readFileSync(STORE_PATH, "utf8") || '{"groups":[]}');
+  } catch {
+    return { groups: [] };
+  }
+}
+
+function writeStore(obj) {
+  fs.writeFileSync(STORE_PATH, JSON.stringify(obj, null, 2));
+}
+
+function isGroupJid(jid = "") {
+  return typeof jid === "string" && jid.endsWith("@g.us");
+}
 
 /* ================= HELPERS ================= */
+
+function getBodyFromMek(mek) {
+  const msg = mek?.message || {};
+  return (
+    msg.conversation ||
+    msg.extendedTextMessage?.text ||
+    msg.imageMessage?.caption ||
+    msg.videoMessage?.caption ||
+    msg.buttonsResponseMessage?.selectedButtonId ||
+    msg.buttonsResponseMessage?.selectedDisplayText ||
+    msg.templateButtonReplyMessage?.selectedId ||
+    msg.templateButtonReplyMessage?.selectedDisplayText ||
+    msg.listResponseMessage?.singleSelectReply?.selectedRowId ||
+    msg.listResponseMessage?.title ||
+    msg.interactiveResponseMessage?.body?.text ||
+    ""
+  );
+}
+
+function tryParseJsonString(s) {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
+function extractTextsFromMek(mek) {
+  const msg = mek?.message || {};
+  const texts = [];
+
+  const vals = [
+    msg.conversation,
+    msg.extendedTextMessage?.text,
+    msg.imageMessage?.caption,
+    msg.videoMessage?.caption,
+    msg.buttonsResponseMessage?.selectedButtonId,
+    msg.buttonsResponseMessage?.selectedDisplayText,
+    msg.templateButtonReplyMessage?.selectedId,
+    msg.templateButtonReplyMessage?.selectedDisplayText,
+    msg.listResponseMessage?.singleSelectReply?.selectedRowId,
+    msg.listResponseMessage?.title,
+    msg.interactiveResponseMessage?.body?.text,
+    msg.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
+  ];
+
+  for (const v of vals) {
+    if (v) texts.push(String(v).trim());
+  }
+
+  const raw = msg.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
+  if (raw) {
+    const parsed = tryParseJsonString(raw);
+    if (parsed) {
+      const pvals = [
+        parsed.id,
+        parsed.selectedId,
+        parsed.selectedRowId,
+        parsed.title,
+        parsed.display_text,
+        parsed.text,
+        parsed.name,
+      ];
+      for (const v of pvals) {
+        if (v) texts.push(String(v).trim());
+      }
+    }
+  }
+
+  return [...new Set(texts.filter(Boolean))];
+}
+
+function normalizeText(s = "") {
+  return String(s).replace(/\s+/g, " ").trim().toUpperCase();
+}
+
+function getSenderJid(sock, mek) {
+  return mek.key?.fromMe ? sock.user?.id : (mek.key?.participant || mek.key?.remoteJid);
+}
+
+function makePendingKey(senderJid, from) {
+  return `${from || ""}::${(senderJid || "").split(":")[0]}`;
+}
 
 async function downloadFile(url, filePath) {
   const writer = fs.createWriteStream(filePath);
@@ -24,9 +130,7 @@ async function downloadFile(url, filePath) {
     headers: { "User-Agent": "Mozilla/5.0" },
     maxRedirects: 5,
   });
-
   res.data.pipe(writer);
-
   return new Promise((resolve, reject) => {
     writer.on("finish", resolve);
     writer.on("error", reject);
@@ -35,27 +139,62 @@ async function downloadFile(url, filePath) {
 
 async function getYoutube(query) {
   const isUrl = /(youtube\.com|youtu\.be)/i.test(query);
-
   if (isUrl) {
     const id = query.includes("v=")
       ? query.split("v=")[1].split("&")[0]
       : query.split("/").pop().split("?")[0];
-
-    return await yts({ videoId: id });
+    const r = await yts({ videoId: id });
+    return r?.title ? r : null;
   }
-
   const search = await yts(query);
-  if (!search.videos.length) return null;
-  return search.videos[0];
+  return search.videos?.[0] || null;
 }
 
-function generateProgressBar(duration = "0:00") {
-  return `*00:00* ──────────◉ *${duration}*`;
+function generateProgressBar(duration) {
+  const totalBars = 10;
+  const bar = "─".repeat(totalBars);
+  return `*00:00* ${bar}○ *${duration || "0:00"}*`;
 }
 
-function makeTempFile(ext = ".mp3") {
-  const id = crypto.randomBytes(6).toString("hex");
-  return path.join(TEMP_DIR, `${Date.now()}_${id}${ext}`);
+async function getGroupName(bot, jid) {
+  try {
+    const meta = await bot.groupMetadata(jid);
+    return meta?.subject || jid;
+  } catch {
+    return jid;
+  }
+}
+
+function sanitizeFileName(name = "youtube_media") {
+  return String(name).replace(/[\\/:*?"<>|]/g, "").trim() || "youtube_media";
+}
+
+function getFileSizeMB(filePath) {
+  const stats = fs.statSync(filePath);
+  return stats.size / (1024 * 1024);
+}
+
+async function reencodeForWhatsApp(inputPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg(inputPath)
+      .videoCodec("libx264")
+      .audioCodec("aac")
+      .outputOptions([
+        "-movflags +faststart",
+        "-pix_fmt yuv420p",
+        "-profile:v main",
+        "-level 3.1",
+        "-preset veryfast",
+        "-crf 28",
+        "-maxrate 1200k",
+        "-bufsize 2400k",
+        "-vf scale='min(854,iw)':-2"
+      ])
+      .format("mp4")
+      .on("end", () => resolve(outputPath))
+      .on("error", reject)
+      .save(outputPath);
+  });
 }
 
 function safeUnlink(file) {
@@ -64,418 +203,552 @@ function safeUnlink(file) {
   } catch {}
 }
 
-function formatViews(num) {
-  if (!num) return "Unknown";
-  return Number(num).toLocaleString();
+function makePreviewCaption(video, extraLine = "") {
+  const title = video?.title || "Unknown Title";
+  const channel = video?.author?.name || "Unknown";
+  const duration = video?.timestamp || "0:00";
+  const views = Number(video?.views || 0).toLocaleString();
+  const uploaded = video?.ago || "Unknown";
+  const progressBar = generateProgressBar(duration);
+
+  return `
+🎬 *${title}*
+
+👤 *Channel:* ${channel}
+⏱ *Duration:* ${duration}
+👀 *Views:* ${views}
+📅 *Uploaded:* ${uploaded}
+
+${progressBar}
+${extraLine ? `\n\n${extraLine}` : ""}
+  `.trim();
 }
 
-function sanitizeFileName(name = "youtube_audio") {
-  return String(name).replace(/[\\/:*?"<>|]/g, "").trim() || "youtube_audio";
+function makeSongCaption(video) {
+  const title = video?.title || "Unknown Title";
+  const channel = video?.author?.name || "Unknown";
+  const duration = video?.timestamp || "0:00";
+  const views = Number(video?.views || 0).toLocaleString();
+  const uploaded = video?.ago || "Unknown";
+  const progressBar = generateProgressBar(duration);
+
+  return `
+🎵 *${title}*
+
+👤 *Channel:* ${channel}
+⏱ *Duration:* ${duration}
+👀 *Views:* ${views}
+📅 *Uploaded:* ${uploaded}
+
+${progressBar}
+
+🍀 *ENJOY YOUR SONG* 🍀
+> USE HEADPHONES FOR THE BEST EXPERIENCE 🎧🎧🎧🎧🎧🎧🎧
+  `.trim();
 }
 
-function makePendingKey(sender, from) {
-  return `${from || ""}::${(sender || "").split(":")[0]}`;
+function makeVideoCaption(video, sizeMB, modeLabel = "Video") {
+  const title = video?.title || "Unknown Title";
+  const channel = video?.author?.name || "Unknown";
+  const duration = video?.timestamp || "0:00";
+  const views = Number(video?.views || 0).toLocaleString();
+  const uploaded = video?.ago || "Unknown";
+
+  return `🎬 *${title}*
+
+👤 *Channel:* ${channel}
+⏱ *Duration:* ${duration}
+👀 *Views:* ${views}
+📅 *Uploaded:* ${uploaded}
+📦 *Size:* ${sizeMB.toFixed(2)} MB
+📁 *Mode:* ${modeLabel}`;
 }
 
-function normalizeText(s = "") {
-  return String(s)
-    .replace(/\r/g, "")
-    .replace(/\n+/g, "\n")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toUpperCase();
+/* ================= SENDERS ================= */
+
+async function sendAudioToGroup(bot, quoted, target, video) {
+  await bot.sendMessage(
+    target,
+    {
+      image: { url: video.thumbnail },
+      caption: makeSongCaption(video),
+    },
+    { quoted }
+  );
+
+  const data = await ytmp3(video.url);
+  const audioUrl = data?.url || data?.dl_url || data?.download_url;
+  if (!audioUrl) throw new Error("MP3 download failed (missing url).");
+
+  const filePath = path.join(TEMP_DIR, `${Date.now()}_${Math.random().toString(16).slice(2)}.mp3`);
+  await downloadFile(audioUrl, filePath);
+
+  await bot.sendMessage(
+    target,
+    {
+      audio: fs.readFileSync(filePath),
+      mimetype: "audio/mpeg",
+      fileName: `${sanitizeFileName(video.title)}.mp3`,
+      ptt: false,
+    },
+    { quoted }
+  );
+
+  safeUnlink(filePath);
 }
 
-function tryParseJsonString(s) {
+async function prepareVideoFile(video) {
+  const VIDEO_LIMIT_MB = 45;
+  let rawFile = null;
+  let fixedFile = null;
+
+  const data = await ytmp4(video.url, {
+    format: "mp4",
+    videoQuality: "360",
+  });
+
+  if (!data?.url) throw new Error("Video download failed (missing url).");
+
+  const stamp = Date.now();
+  rawFile = path.join(TEMP_DIR, `cmedia_raw_${stamp}.mp4`);
+  fixedFile = path.join(TEMP_DIR, `cmedia_fixed_${stamp}.mp4`);
+
+  await downloadFile(data.url, rawFile);
+  await reencodeForWhatsApp(rawFile, fixedFile);
+
+  const sizeMB = getFileSizeMB(fixedFile);
+  const fileName = `${sanitizeFileName(video.title)}.mp4`;
+
+  return {
+    rawFile,
+    fixedFile,
+    sizeMB,
+    fileName,
+    asDocument: sizeMB > VIDEO_LIMIT_MB,
+  };
+}
+
+async function sendVideoOnlyToGroup(bot, quoted, target, video) {
+  let prepared = null;
   try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
-}
+    prepared = await prepareVideoFile(video);
 
-function extractTexts(body, mek, m) {
-  const texts = [];
-
-  const direct = [
-    body,
-    m?.body,
-    m?.text,
-    m?.message?.conversation,
-    m?.message?.extendedTextMessage?.text,
-    m?.message?.buttonsResponseMessage?.selectedButtonId,
-    m?.message?.buttonsResponseMessage?.selectedDisplayText,
-    m?.message?.templateButtonReplyMessage?.selectedId,
-    m?.message?.templateButtonReplyMessage?.selectedDisplayText,
-    m?.message?.listResponseMessage?.title,
-    m?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
-    m?.message?.interactiveResponseMessage?.body?.text,
-    m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
-    mek?.message?.conversation,
-    mek?.message?.extendedTextMessage?.text,
-    mek?.message?.buttonsResponseMessage?.selectedButtonId,
-    mek?.message?.buttonsResponseMessage?.selectedDisplayText,
-    mek?.message?.templateButtonReplyMessage?.selectedId,
-    mek?.message?.templateButtonReplyMessage?.selectedDisplayText,
-    mek?.message?.listResponseMessage?.title,
-    mek?.message?.listResponseMessage?.singleSelectReply?.selectedRowId,
-    mek?.message?.interactiveResponseMessage?.body?.text,
-    mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson,
-  ];
-
-  for (const item of direct) {
-    if (item) texts.push(String(item).trim());
-  }
-
-  const p1 = m?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-  const p2 = mek?.message?.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson;
-
-  for (const raw of [p1, p2]) {
-    if (!raw) continue;
-    const parsed = tryParseJsonString(raw);
-    if (!parsed) continue;
-
-    const vals = [
-      parsed.id,
-      parsed.selectedId,
-      parsed.selectedRowId,
-      parsed.title,
-      parsed.display_text,
-      parsed.text,
-      parsed.name,
-    ];
-
-    for (const v of vals) {
-      if (v) texts.push(String(v).trim());
+    if (prepared.asDocument) {
+      await bot.sendMessage(
+        target,
+        {
+          document: fs.readFileSync(prepared.fixedFile),
+          mimetype: "video/mp4",
+          fileName: prepared.fileName,
+          caption: makeVideoCaption(video, prepared.sizeMB, "Document"),
+        },
+        { quoted }
+      );
+    } else {
+      await bot.sendMessage(
+        target,
+        {
+          video: fs.readFileSync(prepared.fixedFile),
+          mimetype: "video/mp4",
+          fileName: prepared.fileName,
+          caption: makeVideoCaption(video, prepared.sizeMB, "Playable Video"),
+          gifPlayback: false,
+        },
+        { quoted }
+      );
     }
+  } finally {
+    safeUnlink(prepared?.rawFile);
+    safeUnlink(prepared?.fixedFile);
   }
-
-  return [...new Set(texts.filter(Boolean))];
 }
 
-function extractSongTypeFromTexts(texts) {
+async function sendVideoAndAudioToGroup(bot, quoted, target, video) {
+  let prepared = null;
+  let audioFile = null;
+
+  try {
+    // VIDEO
+    prepared = await prepareVideoFile(video);
+
+    if (prepared.asDocument) {
+      await bot.sendMessage(
+        target,
+        {
+          document: fs.readFileSync(prepared.fixedFile),
+          mimetype: "video/mp4",
+          fileName: prepared.fileName,
+          caption: makeVideoCaption(video, prepared.sizeMB, "Document"),
+        },
+        { quoted }
+      );
+    } else {
+      await bot.sendMessage(
+        target,
+        {
+          video: fs.readFileSync(prepared.fixedFile),
+          mimetype: "video/mp4",
+          fileName: prepared.fileName,
+          caption: makeVideoCaption(video, prepared.sizeMB, "Playable Video"),
+          gifPlayback: false,
+        },
+        { quoted }
+      );
+    }
+
+    // small delay
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    // AUDIO
+    const a = await ytmp3(video.url);
+    const audioUrl = a?.url || a?.dl_url || a?.download_url;
+
+    if (!audioUrl) {
+      throw new Error("MP3 download failed (missing url).");
+    }
+
+    audioFile = path.join(
+      TEMP_DIR,
+      `${Date.now()}_${Math.random().toString(16).slice(2)}.mp3`
+    );
+
+    await downloadFile(audioUrl, audioFile);
+
+    const audioBuffer = fs.readFileSync(audioFile);
+
+    await bot.sendMessage(
+      target,
+      {
+        audio: audioBuffer,
+        mimetype: "audio/mpeg",
+        fileName: `${sanitizeFileName(video.title)}.mp3`,
+        ptt: false,
+      },
+      { quoted }
+    );
+  } finally {
+    safeUnlink(prepared?.rawFile);
+    safeUnlink(prepared?.fixedFile);
+    safeUnlink(audioFile);
+  }
+}
+
+/* ================= PENDING ================= */
+
+const pending = Object.create(null);
+const TTL = 2 * 60 * 1000;
+
+function getModeFromTexts(texts) {
   const normalized = texts.map((t) => normalizeText(t)).filter(Boolean);
 
   for (const text of normalized) {
-    if (text.includes("SONGTYPE:AUDIO")) return "audio";
-    if (text.includes("SONGTYPE:DOCUMENT")) return "document";
-    if (text.includes("SONGTYPE:VOICE")) return "voice";
+    if (
+      text.includes("CMODE:AUDIO") ||
+      text.includes("SEND AUDIO")
+    ) return "audio";
 
-    if (text === "AUDIO" || text.includes("AUDIO")) return "audio";
-    if (text === "DOCUMENT" || text.includes("DOCUMENT")) return "document";
-    if (text === "VOICE" || text.includes("VOICE NOTE") || text.includes("VOICE"))
-      return "voice";
+    if (
+      text.includes("CMODE:VIDEO_AUDIO") ||
+      text.includes("VIDEO & AUDIO") ||
+      text.includes("VIDEO AND AUDIO")
+    ) return "video_audio";
 
-    if (text === "1") return "audio";
-    if (text === "2") return "document";
-    if (text === "3") return "voice";
+    if (
+      text.includes("CMODE:VIDEO") ||
+      text.includes("SEND VIDEO")
+    ) return "video";
   }
 
   return null;
 }
 
-function buildSongDetails(video) {
-  const title = video.title || "Unknown Title";
-  const channel = video.author?.name || "Unknown Channel";
-  const duration = video.timestamp || "0:00";
-  const views = formatViews(video.views);
-  const uploaded = video.ago || "Unknown";
-  const url = video.url || "Unavailable";
-
-  return `🎵 *${title}*
-
-╭━━━〔 🎧 SONG DETAILS 〕━━━╮
-👤 *Channel:* ${channel}
-⏱️ *Duration:* ${duration}
-👀 *Views:* ${views}
-📅 *Uploaded:* ${uploaded}
-🔗 *Link:* ${url}
-╰━━━━━━━━━━━━━━━╯
-
-${generateProgressBar(duration)}
-
-🍀 *ENJOY YOUR SONG* 🍀
-> USE HEADPHONES FOR THE BEST EXPERIENCE 🎧`;
-}
-
-function getSongTypeLabel(choice) {
-  switch (String(choice).trim().toLowerCase()) {
-    case "1":
-    case "audio":
-    case "songtype:audio":
-      return "Audio";
-    case "2":
-    case "document":
-    case "songtype:document":
-      return "Document";
-    case "3":
-    case "voice":
-    case "voicenote":
-    case "songtype:voice":
-      return "Voice Note";
-    default:
-      return "Unknown";
-  }
-}
-
-function getSongTypeFromChoice(choice) {
-  switch (String(choice).trim().toLowerCase()) {
-    case "1":
-    case "audio":
-    case "songtype:audio":
-      return "audio";
-    case "2":
-    case "document":
-    case "songtype:document":
-      return "document";
-    case "3":
-    case "voice":
-    case "voicenote":
-    case "songtype:voice":
-      return "voice";
-    default:
-      return null;
-  }
-}
-
-async function sendSongInteractiveMenu(sock, from, mek, video) {
-  return sendInteractiveMessage(
-    sock,
-    from,
-    {
-      image: { url: video.thumbnail },
-      text: buildSongDetails(video),
-      footer: "MALIYA-MD | Song Type Selector",
-      interactiveButtons: [
-        {
-          name: "single_select",
-          buttonParamsJson: JSON.stringify({
-            title: "Select Type ↯",
-            sections: [
-              {
-                title: "Song Download Types",
-                rows: [
-                  {
-                    title: "🎵 Audio",
-                    description: "Send as normal audio",
-                    id: "songtype:audio",
-                  },
-                  {
-                    title: "📄 Document",
-                    description: "Send as MP3 document",
-                    id: "songtype:document",
-                  },
-                  {
-                    title: "🎙 Voice Note",
-                    description: "Send as voice note",
-                    id: "songtype:voice",
-                  },
-                ],
-              },
-            ],
-          }),
-        },
-      ],
-    },
-    { quoted: mek }
-  );
-}
-
-function isDuplicateSongAction(state, type) {
+function isDuplicateAction(state, sig) {
   const now = Date.now();
-  const sig = `songtype:${type}`;
-
-  if (state.lastActionSig === sig && now - (state.lastActionAt || 0) < 5000) {
-    return true;
-  }
-
-  state.lastActionSig = sig;
-  state.lastActionAt = now;
+  if (state.lastSig === sig && now - (state.lastAt || 0) < 4000) return true;
+  state.lastSig = sig;
+  state.lastAt = now;
   return false;
 }
 
-async function handleSongTypeDownload(sock, mek, from, sender, reply, choiceRaw) {
-  const key = makePendingKey(sender, from);
-  const pending = pendingSongType[key];
-  if (!pending) return;
+async function executeSendMode(bot, quoted, from, target, targetName, video, mode) {
+  if (mode === "audio") {
+    await sendAudioToGroup(bot, quoted, target, video);
+    await bot.sendMessage(
+      from,
+      { text: `✅ Audio sent successfully to *${targetName}*.` },
+      { quoted }
+    );
+    return;
+  }
 
-  const type = getSongTypeFromChoice(choiceRaw);
-  const typeLabel = getSongTypeLabel(choiceRaw);
+  if (mode === "video") {
+    await sendVideoOnlyToGroup(bot, quoted, target, video);
+    await bot.sendMessage(
+      from,
+      { text: `✅ Video sent successfully to *${targetName}*.` },
+      { quoted }
+    );
+    return;
+  }
 
-  if (!type) return;
+  if (mode === "video_audio") {
+    await bot.sendMessage(
+      from,
+      { text: `📦 Sending video and audio to *${targetName}*...` },
+      { quoted }
+    );
 
-  if (pending.isProcessing) return;
-  if (isDuplicateSongAction(pending, type)) return;
+    await sendVideoAndAudioToGroup(bot, quoted, target, video);
 
-  pending.isProcessing = true;
-
-  let filePath = null;
-
-  try {
-    await reply(`⬇️ Downloading *${typeLabel}*...`);
-
-    const data = await ytmp3(pending.video.url);
-    if (!data?.url) {
-      delete pendingSongType[key];
-      return reply("❌ Failed to download selected song.");
-    }
-
-    filePath = makeTempFile(".mp3");
-    await downloadFile(data.url, filePath);
-
-    const cleanTitle = sanitizeFileName(pending.video.title);
-
-    if (type === "document") {
-      await sock.sendMessage(
-        from,
-        {
-          document: fs.readFileSync(filePath),
-          mimetype: "audio/mpeg",
-          fileName: `${cleanTitle}.mp3`,
-          caption: `🎵 *${pending.video.title || "Unknown Title"}*\n📦 Type: Document`,
-        },
-        { quoted: mek }
-      );
-    } else if (type === "voice") {
-      await sock.sendMessage(
-        from,
-        {
-          audio: fs.readFileSync(filePath),
-          mimetype: "audio/mpeg",
-          ptt: true,
-        },
-        { quoted: mek }
-      );
-    } else {
-      await sock.sendMessage(
-        from,
-        {
-          audio: fs.readFileSync(filePath),
-          mimetype: "audio/mpeg",
-          fileName: `${cleanTitle}.mp3`,
-        },
-        { quoted: mek }
-      );
-    }
-
-    delete pendingSongType[key];
-  } catch (e) {
-    console.log("SONG TYPE ERROR:", e);
-    reply("❌ Error while downloading selected song.");
-    delete pendingSongType[key];
-  } finally {
-    safeUnlink(filePath);
-
-    if (pendingSongType[key]) {
-      pendingSongType[key].isProcessing = false;
-    }
+    await bot.sendMessage(
+      from,
+      { text: `✅ Video and audio sent successfully to *${targetName}*.` },
+      { quoted }
+    );
+    return;
   }
 }
 
-/* ================= SONG ================= */
+/* ================= COMMANDS: TARGET GROUP MGMT ================= */
 
 cmd(
-  {
-    pattern: "song",
-    alias: ["mp3", "music", "sound"],
-    react: "🎵",
-    category: "download",
-    filename: __filename,
-  },
-  async (bot, mek, m, { from, q, sender, reply }) => {
+  { pattern: "ctarget", react: "🎯", category: "config", filename: __filename },
+  async (bot, mek, m, { from, reply }) => {
     try {
-      if (!q) return reply("🎧 Please send a song name or YouTube link.");
+      if (!isGroupJid(from)) return reply("Use this command inside a group.");
 
-      await reply("🔍 Searching YouTube...");
-      const video = await getYoutube(q);
-      if (!video) return reply("❌ No results found.");
+      const store = readStore();
+      if (!store.groups.includes(from)) {
+        store.groups.push(from);
+        writeStore(store);
+      }
 
-      const key = makePendingKey(sender, from);
-
-      pendingSongType[key] = {
-        video,
-        from,
-        createdAt: Date.now(),
-        isProcessing: false,
-        lastActionSig: "",
-        lastActionAt: 0,
-      };
-
-      await sendSongInteractiveMenu(bot, from, mek, video);
+      const name = await getGroupName(bot, from);
+      return reply(`Saved target group: *${name}*`);
     } catch (e) {
-      console.log("SONG MENU ERROR:", e);
-      reply("❌ Error while preparing song menu.");
+      console.log(e);
+      return reply("Error saving target group.");
     }
   }
 );
 
-replyHandlers.push({
-  filter: (_body, { sender, from }) => {
-    const key = makePendingKey(sender, from);
-    return !!pendingSongType[key];
-  },
+cmd(
+  { pattern: "ctargetlist", react: "📋", category: "config", filename: __filename },
+  async (bot, mek, m, { reply }) => {
+    try {
+      const store = readStore();
+      if (!store.groups.length) return reply("No target groups saved.");
 
-  function: async (sock, mek, m, { from, body, sender, reply }) => {
-    const key = makePendingKey(sender, from);
-    const pending = pendingSongType[key];
-    if (!pending) return;
-    if (pending.isProcessing) return;
-
-    const texts = extractTexts(body, mek, m);
-    let type = extractSongTypeFromTexts(texts);
-
-    if (!type && /^[1-3]$/.test(String(body || "").trim())) {
-      type = getSongTypeFromChoice(body);
+      const names = await Promise.all(store.groups.map((g) => getGroupName(bot, g)));
+      const lines = names.map((n, i) => `${i + 1}. ${n}`).join("\n");
+      return reply(`Saved target groups:\n\n${lines}\n\nRemove: .ctargetdel <number>\nClear: .ctargetclear`);
+    } catch (e) {
+      console.log(e);
+      return reply("Error listing target groups.");
     }
-
-    if (!type) return; // unrelated message ignore
-
-    return handleSongTypeDownload(sock, mek, from, sender, reply, type);
-  },
-});
-
-/* ================= TIKTOK ================= */
+  }
+);
 
 cmd(
-  {
-    pattern: "tiktok",
-    alias: ["ttdl", "tt", "tiktokdl"],
-    react: "🎥",
-    category: "download",
-    filename: __filename,
-  },
-  async (bot, mek, m, { from, q, reply }) => {
+  { pattern: "ctargetdel", alias: ["ctargetremove"], react: "🗑️", category: "config", filename: __filename },
+  async (bot, mek, m, { q, reply }) => {
     try {
-      if (!q) return reply("Please send a TikTok link.");
+      const store = readStore();
+      if (!store.groups.length) return reply("No target groups saved.");
 
-      reply("Downloading TikTok video...");
-      const data = await tiktok(q);
+      const num = parseInt((q || "").trim(), 10);
+      if (!num || num < 1 || num > store.groups.length) {
+        return reply(`Usage: .ctargetdel <number>\nExample: .ctargetdel 2`);
+      }
 
-      if (!data?.no_watermark)
-        return reply("Failed to download TikTok video.");
+      const removed = store.groups.splice(num - 1, 1)[0];
+      writeStore(store);
 
-      await bot.sendMessage(
+      const name = await getGroupName(bot, removed);
+      return reply(`Removed target group: *${name}*`);
+    } catch (e) {
+      console.log(e);
+      return reply("Error removing target group.");
+    }
+  }
+);
+
+cmd(
+  { pattern: "ctargetclear", react: "🧹", category: "config", filename: __filename },
+  async (bot, mek, m, { reply }) => {
+    try {
+      writeStore({ groups: [] });
+      return reply("All target groups cleared.");
+    } catch (e) {
+      console.log(e);
+      return reply("Error clearing target groups.");
+    }
+  }
+);
+
+/* ================= MAIN COMMAND ================= */
+
+cmd(
+  { pattern: "csend", alias: ["cmedia"], react: "🎬", category: "download", filename: __filename },
+  async (bot, mek, m, { from, q, reply, sender }) => {
+    try {
+      const store = readStore();
+      const groups = store.groups || [];
+
+      if (!groups.length) {
+        return reply("No target groups saved. Use .ctarget inside a group first.");
+      }
+
+      if (!q) return reply("Please provide a song/video name or YouTube link.");
+
+      await reply("🔎 Searching media...");
+
+      const video = await getYoutube(q);
+      if (!video) return reply("No results found.");
+
+      const senderJid = sender || getSenderJid(bot, mek);
+      const key = makePendingKey(senderJid, from);
+
+      pending[key] = {
+        mode: "choose_send_type",
+        video,
+        groups,
+        from,
+        createdAt: Date.now(),
+        lastSig: "",
+        lastAt: 0,
+        isProcessing: false,
+      };
+
+      await sendButtons(
+        bot,
         from,
         {
-          video: { url: data.no_watermark },
-          caption: "TikTok video downloaded successfully.\nMALIYA-MD ❤️",
+          title: "🎯 Choose Send Type",
+          text: makePreviewCaption(video),
+          footer: "MALIYA-MD | Media Sender",
+          image: { url: video.thumbnail },
+          buttons: [
+            { id: "cmode:audio", text: "🎵 Send Audio" },
+            { id: "cmode:video", text: "🎬 Send Video" },
+            { id: "cmode:video_audio", text: "📦 Send Video & Audio" },
+          ],
         },
         { quoted: mek }
       );
     } catch (e) {
-      console.log(e);
-      reply("Error while downloading TikTok video.");
+      console.log("csend command error:", e?.message || e);
+      return reply("Error while processing the media.");
     }
   }
 );
 
-setInterval(() => {
-  const now = Date.now();
-  const timeout = 2 * 60 * 1000;
+/* ================= BUTTON / NUMBER HOOK ================= */
 
-  for (const key of Object.keys(pendingSongType)) {
-    if (now - pendingSongType[key].createdAt > timeout) {
-      delete pendingSongType[key];
+global.pluginHooks = global.pluginHooks || [];
+global.pluginHooks.push({
+  onMessage: async (bot, mek) => {
+    try {
+      const from = mek.key?.remoteJid;
+      if (!from || from === "status@broadcast") return;
+
+      const senderJid = getSenderJid(bot, mek);
+      if (!senderJid) return;
+
+      const key = makePendingKey(senderJid, from);
+      const p = pending[key];
+      if (!p) return;
+
+      if (p.from !== from) return;
+
+      if (Date.now() - p.createdAt > TTL) {
+        delete pending[key];
+        await bot.sendMessage(
+          from,
+          { text: "Selection expired. Please run .csend again." },
+          { quoted: mek }
+        );
+        return;
+      }
+
+      if (p.isProcessing) return;
+
+      const body = (getBodyFromMek(mek) || "").trim();
+      const texts = extractTextsFromMek(mek);
+      const mode = getModeFromTexts(texts);
+
+      if (p.mode === "choose_send_type") {
+        if (!mode) return;
+
+        if (isDuplicateAction(p, `mode:${mode}`)) return;
+
+        if (p.groups.length === 1) {
+          const target = p.groups[0];
+          const targetName = await getGroupName(bot, target);
+
+          p.isProcessing = true;
+          try {
+            delete pending[key];
+            await bot.sendMessage(
+              from,
+              { text: `📤 Sending to *${targetName}*...` },
+              { quoted: mek }
+            );
+            await executeSendMode(bot, mek, from, target, targetName, p.video, mode);
+          } finally {}
+          return;
+        }
+
+        p.mode = "choose_group";
+        p.selectedSendMode = mode;
+        p.createdAt = Date.now();
+
+        const names = await Promise.all(p.groups.map((g) => getGroupName(bot, g)));
+        const list = names.map((n, i) => `${i + 1}. ${n}`).join("\n");
+
+        await bot.sendMessage(
+          from,
+          {
+            text: `🎯 *Selected:* ${mode === "audio" ? "Send Audio" : mode === "video" ? "Send Video" : "Send Video & Audio"}\n\nReply with target group number:\n\n${list}`,
+          },
+          { quoted: mek }
+        );
+        return;
+      }
+
+      if (p.mode === "choose_group") {
+        if (!/^\d+$/.test(body)) return;
+
+        const num = parseInt(body, 10);
+        if (num < 1 || num > p.groups.length) {
+          await bot.sendMessage(
+            from,
+            { text: `Invalid number. Reply 1-${p.groups.length} only.` },
+            { quoted: mek }
+          );
+          return;
+        }
+
+        if (isDuplicateAction(p, `group:${num}`)) return;
+
+        const target = p.groups[num - 1];
+        const targetName = await getGroupName(bot, target);
+        const modeToSend = p.selectedSendMode;
+
+        p.isProcessing = true;
+
+        delete pending[key];
+
+        await bot.sendMessage(
+          from,
+          { text: `📤 Sending to *${targetName}*...` },
+          { quoted: mek }
+        );
+
+        await executeSendMode(bot, mek, from, target, targetName, p.video, modeToSend);
+      }
+    } catch (e) {
+      console.log("csend hook error:", e?.message || e);
     }
-  }
-}, 30000);
+  },
+});
